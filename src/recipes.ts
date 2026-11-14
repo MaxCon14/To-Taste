@@ -18,7 +18,7 @@ export type RecipeDraft = {
 export type Recipe = RecipeDraft & {
   id: string;
   favorite: boolean;
-  discovery?: { author: string; diet?: RecipeDiet; onePan?: boolean; weekend?: boolean };
+  discovery?: { author: string; authorId?: string; diet?: RecipeDiet; onePan?: boolean; weekend?: boolean };
 };
 
 export const emptyDraft: RecipeDraft = {

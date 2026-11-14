@@ -102,10 +102,11 @@ export function ShareSheet({ recipe, account, close, share, published, unpublish
   </Sheet>;
 }
 
-export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelcome, onSync, onSettings }: {
+export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelcome, onSync, onSettings, onPublicProfile }: {
   account: Account | null; diet: Diet; onDiet: () => void; onAuth: () => void; onLogout: () => void;
   onSync?: () => void; onSettings: () => void;
   onReplayWelcome: () => void;
+  onPublicProfile: () => void;
 }) {
   return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.profileScroll}>
     <View style={styles.profile}>
@@ -120,6 +121,7 @@ export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelco
       </View>
       {accountsConfigured && onSync && <Action label="Sync your cookbook" onPress={onSync} />}
       {account ? <>
+        <Action secondary label="Your public profile" onPress={onPublicProfile} />
         <Action secondary label="Account settings" onPress={onSettings} />
         <Action secondary label="Sign out" onPress={onLogout} />
       </> : accountsConfigured && <Action secondary={Boolean(onSync)} label="Sign in or create an account" onPress={onAuth} />}

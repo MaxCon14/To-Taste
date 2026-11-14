@@ -9,6 +9,8 @@ import { GlassNav, type Tab } from './GlassNav';
 import { MotionProvider, Scene, WebPolish } from './motion';
 import { Library, type Filter } from './Library';
 import { Onboarding } from './Onboarding';
+import { CookProfile, EditCook, FindCooks } from './CookProfiles';
+import type { CookLookup } from './socialApi';
 import type { Personalization } from './allergens';
 import { RecipeForm, type FormState } from './RecipeForm';
 import { RecipeScreen } from './RecipeScreen';
@@ -18,7 +20,7 @@ import type { ShoppingItem } from './shopping';
 import { Action, color, Copy, font } from './ui';
 import { DietSheet, Profile, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
 import { AccountAccess } from './AccountAccess';
-import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readPublications, readSession, savePersonalization, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
+import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readFollowingRecipes, readPublications, readSession, savePersonalization, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
 import { exchangeAuthCallback, requestAccountDeletion, restoreNativeCallback, signInWithProvider } from './accountAuth';
 import { monitorSession } from './supabase';
 
@@ -28,7 +30,7 @@ const shoppingKey = 'pinch.shopping.v1';
 const intentKey = 'to-taste.auth-intent.v1';
 
 type Notice = { text: string; undo?: () => void; viewList?: boolean; error?: boolean; persistent?: boolean };
-type AuthIntent = { kind: 'access' | 'link'; tab: Tab; selected?: string; share?: string; created: number };
+type AuthIntent = { kind: 'access' | 'link'; tab: Tab; selected?: string; share?: string; cook?: string; created: number };
 
 function parseIntent(value: string): AuthIntent | null {
   try {
@@ -89,6 +91,20 @@ function Cookbook() {
   const [showSyncOffer, setShowSyncOffer] = useState(false);
   const [published, setPublished] = useState<Record<string, ShareOptions>>({});
   const [community, setCommunity] = useState<Recipe[]>([]);
+  const [following, setFollowing] = useState<Recipe[]>();
+  const [followingFailed, setFollowingFailed] = useState(false);
+  const [followRevision, setFollowRevision] = useState(0);
+  const [feed, setFeed] = useState<'explore' | 'following'>('explore');
+  const [findCooks, setFindCooks] = useState(false);
+  const [cook, setCook] = useState<CookLookup>();
+  const [editCook, setEditCook] = useState(false);
+  const [openedPost, setOpenedPost] = useState<Recipe>();
+  const [profileLink, setProfileLink] = useState(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+    const handle = new URLSearchParams(window.location.search).get('cook');
+    return handle && /^[a-z0-9][a-z0-9_]{2,23}$/.test(handle) ? handle : null;
+  });
+  const openedProfileLink = useRef(false);
   const latest = useRef<Recipe[]>([]);
   const writes = useRef(Promise.resolve());
   const draftWrites = useRef(Promise.resolve());
@@ -197,6 +213,24 @@ function Cookbook() {
   }, [ready, onboarding, tab]);
 
   useEffect(() => {
+    if (!account || onboarding || tab !== 'explore' || feed !== 'following') return;
+    let active = true;
+    setFollowingFailed(false);
+    void readFollowingRecipes().then(posts => { if (active) setFollowing(posts); })
+      .catch(() => { if (active) setFollowingFailed(true); });
+    return () => { active = false; };
+  }, [account?.id, onboarding, tab, feed, followRevision]);
+
+  useEffect(() => {
+    if (!ready || !account || onboarding || !profileLink || openedProfileLink.current) return;
+    openedProfileLink.current = true;
+    setCook({ handle: profileLink });
+    const url = new URL(window.location.href);
+    url.searchParams.delete('cook');
+    window.history.replaceState(window.history.state, '', url);
+  }, [ready, account, onboarding, profileLink]);
+
+  useEffect(() => {
     let active = true;
     if (account) void readPublications(account.id).then((posts) => { if (active) setPublished(posts); }).catch(() => {});
     else setPublished({});
@@ -239,7 +273,7 @@ function Cookbook() {
     return operation;
   }
 
-  const discoveries = [...featuredRecipes, ...community];
+  const discoveries = [...new Map([...featuredRecipes, ...community, ...(following ?? []), ...(openedPost ? [openedPost] : [])].map(recipe => [recipe.id, recipe])).values()];
 
   function favorite(id: string) {
     const found = discoveries.find((recipe) => recipe.id === id);
@@ -350,11 +384,13 @@ function Cookbook() {
     setTab(intent.tab);
     setSelected(intent.selected);
     setShare(intent.share);
+    if (intent.cook && /^[a-z0-9][a-z0-9_]{2,23}$/.test(intent.cook)) setProfileLink(intent.cook);
   }
 
   async function prepareAuth(kind: AuthIntent['kind'] = 'access') {
     const destination = onboarding ? 'explore' : tab;
-    await AsyncStorage.setItem(intentKey, JSON.stringify({ kind, tab: destination, selected, share, created: Date.now() }));
+    await AsyncStorage.setItem(intentKey, JSON.stringify({ kind, tab: destination, selected, share,
+      cook: !openedProfileLink.current ? profileLink : undefined, created: Date.now() }));
   }
 
   function applySession() {
@@ -418,6 +454,13 @@ function Cookbook() {
     accountRef.current = null;
     latest.current = [];
     setAccount(null);
+    setFollowing(undefined);
+    setFollowingFailed(false);
+    setFeed('explore');
+    setFindCooks(false);
+    setCook(undefined);
+    setEditCook(false);
+    setOpenedPost(undefined);
     setOnboarding(true);
     setRecipes([]);
     setDraft(undefined);
@@ -494,7 +537,8 @@ function Cookbook() {
   const shareRecipe = recipes.find((recipe) => recipe.id === share);
   const recipeSaved = Boolean(activeRecipe && recipes.some((recipe) => recipe.id === activeRecipe.id));
   const recipeEditable = recipeSaved && activeRecipe?.discovery?.author === undefined && !activeRecipe?.id.startsWith('community:');
-  const exploreRecipes = discoveries.map((recipe) => ({ ...recipe, favorite: recipes.find((saved) => saved.id === recipe.id)?.favorite ?? false }));
+  const exploreRecipes = (feed === 'following' ? following ?? [] : [...featuredRecipes, ...community])
+    .map((recipe) => ({ ...recipe, favorite: recipes.find((saved) => saved.id === recipe.id)?.favorite ?? false }));
   const libraryActive = tab === 'saved';
   function changeTab(next: Tab) {
     setSelected(undefined);
@@ -512,6 +556,8 @@ function Cookbook() {
       <View style={[styles.safe, tab !== 'explore' && styles.inactiveTab]} pointerEvents={tab === 'explore' ? 'auto' : 'none'}
         aria-hidden={tab !== 'explore'} importantForAccessibility={tab === 'explore' ? 'auto' : 'no-hide-descendants'}>
         <Library active={tab === 'explore'} explore recipes={exploreRecipes} filter="all" setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
+          social={{ feed, setFeed, find: () => setFindCooks(true), loading: feed === 'following' && following === undefined && !followingFailed,
+            failed: feed === 'following' && followingFailed, retry: () => setFollowRevision(value => value + 1) }}
           personalization={account.personalization}
           preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)}
           onDismissDiet={showDietPrompt ? () => void saveDiet('any').catch(showError) : undefined} />
@@ -532,10 +578,12 @@ function Cookbook() {
         onClearChecked={() => void updateShopping((current) => current.filter((item) => !item.checked))}
         onExplore={() => changeTab('explore')} />}
       {tab === 'profile' && <Scene style={styles.safe}><Profile account={account} diet={preference} onDiet={() => setDietSheet(true)} onAuth={() => setAuth(true)} onLogout={() => void logout()}
+        onPublicProfile={() => setCook({ id: account.id })}
         onSync={guestRecipes.length ? () => account ? setSyncPrompt(true) : setAuth(true) : undefined}
         onSettings={() => setAccountSettings(true)} onReplayWelcome={() => setOnboarding(true)} /></Scene>}
     </SafeAreaView>
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
+      onAuthor={activeRecipe.discovery?.authorId ? () => setCook({ id: activeRecipe.discovery!.authorId! }) : undefined}
       reviewerId={account.id}
       allergens={account.personalization?.allergens}
       onBack={() => setSelected(undefined)} onFavorite={() => favorite(activeRecipe.id)}
@@ -547,6 +595,14 @@ function Cookbook() {
         setShare(activeRecipe.id);
         if (!account) setAuth(true);
       } : undefined} />}
+    {findCooks && <FindCooks close={() => setFindCooks(false)} open={lookup => { setFindCooks(false); setCook(lookup); }} />}
+    {cook && !editCook && <CookProfile lookup={cook} account={account} close={() => setCook(undefined)} edit={() => setEditCook(true)}
+      openRecipe={recipe => { setOpenedPost(recipe); setSelected(recipe.id); setCook(undefined); }}
+      followChanged={() => setFollowRevision(value => value + 1)} />}
+    {editCook && <EditCook account={account} close={() => setEditCook(false)} saved={() => {
+      setEditCook(false);
+      setCook({ id: account.id });
+    }} />}
     {notice && <View style={[styles.notice, notice.error && styles.noticeError]}>
       <Copy accessibilityRole={notice.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={styles.noticeText}>{notice.text}</Copy>
       {notice.undo && <Pressable accessibilityRole="button" onPress={notice.undo} style={styles.undo}><Copy style={styles.undoText}>Undo</Copy></Pressable>}

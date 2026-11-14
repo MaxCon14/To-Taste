@@ -14,9 +14,10 @@ type Props = {
   onOpen: (id: string) => void; onFavorite: (id: string) => void; onAdd: () => void;
   explore?: boolean; preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
   personalization?: Personalization;
+  social?: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; find: () => void; loading: boolean; failed: boolean; retry: () => void };
 };
 
-export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization }: Props) {
+export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization, social }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const wide = width >= 850;
   const [query, setQuery] = useState('');
@@ -32,11 +33,12 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
       && (collection !== 'Under 30 min' || (Number(recipe.minutes) > 0 && Number(recipe.minutes) < 30))
       && (collection !== 'One pan' || recipe.discovery?.onePan)
       && (collection !== 'Weekend' || recipe.discovery?.weekend))));
-  const entries = recipeRecommendations(matching, preference, personalization, explore);
+  const following = social?.feed === 'following';
+  const entries = recipeRecommendations(matching, preference, personalization, explore && !following);
   const visible = entries.map(({ recipe }) => recipe);
   const warnings = new Map(entries.map(({ recipe, warnings }) => [recipe.id, warningLabels(warnings)]));
   const filtered = Boolean(search || collection !== 'All' || strict !== 'any');
-  const featured = explore && !filtered ? visible[0] : undefined;
+  const featured = explore && !filtered && !following ? visible[0] : undefined;
   const rest = featured ? visible.slice(1) : visible;
   const gridWidth = Math.min(width - 40, 1120);
   const readableWidth = width / fontScale;
@@ -61,12 +63,19 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
       <View style={styles.content}>
         <View style={[styles.intro, wide && styles.introWide]}>
           <View style={styles.introText}>
-            <Copy accessibilityRole="header" style={[styles.heading, wide && styles.headingWide]}>{explore ? 'Explore' : 'Your recipes'}</Copy>
-            <Copy style={styles.subtitle}>{explore ? 'A little inspiration. Something delicious.' : 'Good food, worth keeping.'}</Copy>
+            <Copy accessibilityRole="header" style={[styles.heading, wide && styles.headingWide]}>{following ? 'Following' : explore ? 'Explore' : 'Your recipes'}</Copy>
+            <Copy style={styles.subtitle}>{following ? 'New recipes from cooks you follow.' : explore ? 'A little inspiration. Something delicious.' : 'Good food, worth keeping.'}</Copy>
           </View>
           {wide && <Copy style={styles.edition}>{explore ? 'THE EVERYDAY COLLECTION' : 'YOUR PERSONAL COLLECTION'}</Copy>}
         </View>
         <View style={styles.toolbar}>
+          {social && <View style={styles.socialControls}>
+            <View style={[segmentTrack, styles.feedTabs]}>
+              <Segment label="For you" active={!following} onPress={() => social.setFeed('explore')} />
+              <Segment label="Following" active={following} onPress={() => social.setFeed('following')} />
+            </View>
+            <Action secondary label="Find cooks" onPress={social.find}><Glyph name="search" color={color.ink} size={16} /></Action>
+          </View>}
           <View style={styles.searchRow}>
           <View testID="recipe-search" style={[styles.search, searchFocused && styles.searchFocused]}>
             <Glyph name="search" size={19} color={searchFocused ? color.ink : color.soft} />
@@ -138,7 +147,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           </View>}
           {!!rest.length && <>
             <View style={styles.listHeader}>
-              <Copy accessibilityRole="header" style={styles.listTitle}>{filtered ? 'Your matches' : explore ? 'Find your next favorite' : filter === 'favorites' ? 'Your favorites' : 'All recipes'}</Copy>
+              <Copy accessibilityRole="header" style={styles.listTitle}>{filtered ? 'Your matches' : following ? 'Latest recipes' : explore ? 'Find your next favorite' : filter === 'favorites' ? 'Your favorites' : 'All recipes'}</Copy>
               <Copy style={styles.caption}>{rest.length} {rest.length === 1 ? 'recipe' : 'recipes'}</Copy>
             </View>
             <View style={[styles.grid, wide && styles.gridWide]}>
@@ -156,7 +165,14 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
               </View>)}
             </View>
           </>}
-          {!visible.length && <View style={styles.empty}>
+          {following && social.loading && <Copy accessibilityLiveRegion="polite" style={styles.emptyCopy}>Loading recipes…</Copy>}
+          {following && social.failed && <Action secondary label="Retry following feed" onPress={social.retry} />}
+          {following && !visible.length && !filtered && !social.loading && !social.failed && <View style={styles.empty}>
+            <Copy accessibilityRole="header" style={styles.listTitle}>Your feed starts here</Copy>
+            <Copy style={styles.emptyCopy}>Find a cook to follow and their published recipes will appear here.</Copy>
+            <Action label="Find cooks" onPress={social.find} />
+          </View>}
+          {!visible.length && (!following || (filtered && !social.loading && !social.failed)) && <View style={styles.empty}>
             <View style={styles.emptyIcon}><Glyph name={filter === 'favorites' && !search ? 'heart' : 'book'} size={28} color={color.ink} /></View>
             <Copy style={styles.listTitle}>{search || explore ? 'Nothing here just yet' : filter === 'favorites' ? 'Keep your favorites close' : 'A home for your recipes'}</Copy>
             <Copy style={styles.emptyCopy}>{search || explore ? 'Try another ingredient or adjust your filters.' : filter === 'favorites' ? 'Tap the heart on any recipe. Find it here whenever you need it.' : 'Start with a family favorite or a recipe you found online.'}</Copy>
@@ -181,6 +197,8 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
 }
 
 const styles = StyleSheet.create({
+  socialControls: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  feedTabs: { flexGrow: 1, minWidth: 170 },
   warningTag: { alignSelf: 'flex-start', color: color.error, backgroundColor: '#FFF2EF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, fontFamily: font.bold, fontSize: 12 },
   page: { flex: 1 },
   header: { backgroundColor: color.surface },

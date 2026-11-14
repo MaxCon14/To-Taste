@@ -8,7 +8,7 @@ export type Session = { user: Account | null; recipes: Recipe[] };
 export const accountsConfigured = Boolean(supabase);
 
 type CookbookRow = { id: string; recipe: Recipe };
-type Publication = { id: string; recipe_id: string; recipe: Recipe; options: ShareOptions };
+type Publication = { id: string; user_id: string; recipe_id: string; recipe: Recipe; options: ShareOptions };
 
 async function cookbook(userId: string): Promise<Recipe[]> {
   const recipes: Recipe[] = [];
@@ -55,14 +55,25 @@ export async function saveProfile(id: string, values: { display_name?: string; d
   return { id, name: data.display_name, diet: data.diet };
 }
 
-export async function readCommunity(): Promise<Recipe[]> {
+export async function readCommunity(cookId?: string): Promise<Recipe[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase.from('community_recipes').select('id,recipe,options')
-    .order('published_at', { ascending: false }).limit(100);
+  const query = supabase.from('community_recipes').select('id,user_id,recipe,options');
+  const { data, error } = await (cookId ? query.eq('user_id', cookId) : query)
+    .order('published_at', { ascending: false }).order('id').limit(100);
   if (error) throw error;
-  return (data as Publication[]).map(row => ({
+  return publishedRecipes(data as Publication[]);
+}
+
+export async function readFollowingRecipes(): Promise<Recipe[]> {
+  const { data, error } = await requireSupabase().rpc('followed_recipes');
+  if (error) throw error;
+  return publishedRecipes(data as Publication[]);
+}
+
+function publishedRecipes(rows: Publication[]): Recipe[] {
+  return rows.map(row => ({
     ...row.recipe, id: `community:${row.id}`, favorite: false,
-    discovery: { author: row.recipe.discovery?.author || 'From the community',
+    discovery: { author: row.recipe.discovery?.author || 'From the community', authorId: row.user_id,
       diet: row.options.diet === 'any' ? undefined : row.options.diet, onePan: row.options.onePan, weekend: row.options.weekend },
   }));
 }

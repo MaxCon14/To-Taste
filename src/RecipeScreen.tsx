@@ -13,11 +13,12 @@ import { RecipeReviews } from './RecipeReviews';
 import { reviewTarget } from './reviewApi';
 import { Action, color, Copy, Cover, Favorite, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
 
-export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients, allergens = [], reviewerId }: {
+export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients, onAuthor, allergens = [], reviewerId }: {
   recipe: Recipe; onBack: () => void; onEdit?: () => void; onFavorite: () => void; onShare?: () => void; onSave?: () => void; onRemove?: () => void;
   onAddIngredients: (indices: number[]) => Promise<void>;
   allergens?: Allergen[];
   reviewerId?: string;
+  onAuthor?: () => void;
 }) {
   const motion = useSceneMotion(recipe.id, 24);
   useScreenFocus('recipe-title');
@@ -75,7 +76,11 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
           </View>
           <View style={[styles.heroCopy, wide && styles.heroCopyWide]}>
             <Copy testID="recipe-title" accessibilityRole="header" style={[styles.title, wide && styles.titleWide, hasPhoto && styles.titleOnPhoto]}>{recipe.title}</Copy>
-            {recipe.discovery && <Copy style={{ color: hasPhoto ? color.white : color.secondaryInk }}>{recipe.discovery.author}{recipe.discovery.diet ? ` · ${dietOptions[recipe.discovery.diet]}` : ''}</Copy>}
+            {recipe.discovery && (onAuthor ? <Pressable accessibilityRole="button" accessibilityLabel={`View cook profile for ${recipe.discovery.author}`}
+              onPress={onAuthor} style={styles.authorLink}>
+              <Copy style={{ color: hasPhoto ? color.white : color.secondaryInk }}>{recipe.discovery.author}</Copy>
+              <Glyph name="forward" color={hasPhoto ? color.white : color.secondaryInk} size={14} />
+            </Pressable> : <Copy style={{ color: hasPhoto ? color.white : color.secondaryInk }}>{recipe.discovery.author}{recipe.discovery.diet ? ` · ${dietOptions[recipe.discovery.diet]}` : ''}</Copy>)}
             <RecipeFacts recipe={recipe} overPhoto={hasPhoto} />
           </View>
         </View>
@@ -169,6 +174,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
 }
 
 const styles = StyleSheet.create({
+  authorLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
   allergyPanel: { padding: 16, borderRadius: 16, gap: 8, backgroundColor: '#FFF2EF' },
   allergyIngredient: { backgroundColor: '#FFF2EF', borderRadius: 8 },
   allergyTitle: { color: color.error, fontFamily: font.bold, fontSize: 16 },
