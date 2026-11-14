@@ -1,4 +1,7 @@
 
+[functions.import-recipe-video]
+verify_jwt = false
+
 [functions.delete-account]
 enabled = true
 verify_jwt = false

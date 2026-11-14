@@ -3,6 +3,7 @@ import { ActivityIndicator, Animated, KeyboardAvoidingView, Modal, Platform, Scr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { importRecipe, isSocialRecipeLink, normalizeRecipeUrl, recipeFromCaption } from './importRecipe';
 import { emptyDraft, lines, type RecipeDraft } from './recipes';
+import { supabase } from './supabase';
 import { MotionPressable as Pressable, useSceneMotion, useReducedMotion } from './motion';
 import { Glyph } from './Glyph';
 import { Action, color, Copy, Cover, font, IconButton, IngredientCard, Segment, segmentTrack } from './ui';
@@ -109,8 +110,17 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
       void run(async () => {
         const source = normalizeRecipeUrl(url);
         if (video.size > 20 * 1024 * 1024 || !video.size) throw new Error('Choose a video under 20 MB.');
-        const response = await fetch('/api/import-video', {
-          method: 'POST', body: video, headers: { 'Content-Type': video.type },
+        const headers: Record<string, string> = { 'Content-Type': video.type };
+        let endpoint = '/api/import-video';
+        if (!localVideoImport) {
+          const session = (await supabase?.auth.getSession())?.data.session;
+          if (!session) throw new Error('Sign in to analyze a video, or paste the recipe text.');
+          endpoint = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/import-recipe-video`;
+          headers.Authorization = `Bearer ${session.access_token}`;
+          headers.apikey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
+        }
+        const response = await fetch(endpoint, {
+          method: 'POST', body: video, headers,
           signal: AbortSignal.timeout(100_000),
         });
         const result = await response.json();
@@ -167,8 +177,8 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
                 onDraft?.({ mode: 'import', url: value, draft });
               }} placeholder="https://…" autoCapitalize="none" autoCorrect={false}
                 keyboardType="url" inputMode="url" onSubmitEditing={fetchRecipe} editable={!busy} />
-              {socialLink && canWrite && localVideoImport && <>
-                <Copy style={styles.helper}>You can upload a clip you have permission to share. It will be sent to Gemini for analysis.</Copy>
+              {socialLink && canWrite && Platform.OS === 'web' && <>
+                <Copy style={styles.helper}>Upload a clip you have permission to share. It will be sent to Gemini for analysis.{!localVideoImport && ' Video analysis requires signing in.'}</Copy>
                 <Action secondary label="Upload video" onPress={chooseVideo} disabled={busy} />
               </>}
               {socialLink && (canWrite || caption) && <Field label="Caption or transcript" hint="Paste the recipe text with Ingredients and Directions headings."
