@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MotionPressable as Pressable, useSceneMotion, useReducedMotion } from './motion';
 import { Glyph } from './Glyph';
 import { dietOptions, type Diet, type Recipe } from './recipes';
-import { accountsConfigured, type Account } from './cookbookApi';
+import type { Account } from './cookbookApi';
 import { Action, color, Copy, Cover, font, IconButton, IngredientPreview } from './ui';
 
 export function RecipeOption({ title, description, icon, onPress }: { title: string; description: string; icon: 'link' | 'edit'; onPress: () => void }) {
@@ -102,34 +102,6 @@ export function ShareSheet({ recipe, account, close, share, published, unpublish
   </Sheet>;
 }
 
-export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelcome, onSync, onSettings, onPublicProfile }: {
-  account: Account | null; diet: Diet; onDiet: () => void; onAuth: () => void; onLogout: () => void;
-  onSync?: () => void; onSettings: () => void;
-  onReplayWelcome: () => void;
-  onPublicProfile: () => void;
-}) {
-  return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.profileScroll}>
-    <View style={styles.profile}>
-      <View style={styles.avatar}><Glyph name="profile" size={31} color={color.secondaryInk} /></View>
-      <Copy accessibilityRole="header" style={styles.profileTitle}>{account?.name || 'Your profile'}</Copy>
-      {!account && <Copy style={styles.helper}>{accountsConfigured
-        ? 'Create an account to sync your recipe book and share recipes with the community.'
-        : 'Accounts are unavailable in this build. Your recipes are saved on this device.'}</Copy>}
-      <View style={styles.profileCard}>
-        <Copy style={styles.choiceText}>Diet preference</Copy>
-        <Action secondary label={dietOptions[diet]} accessibilityLabel={`Change diet preference, ${dietOptions[diet]}`} onPress={onDiet} />
-      </View>
-      {accountsConfigured && onSync && <Action label="Sync your cookbook" onPress={onSync} />}
-      {account ? <>
-        <Action secondary label="Your public profile" onPress={onPublicProfile} />
-        <Action secondary label="Account settings" onPress={onSettings} />
-        <Action secondary label="Sign out" onPress={onLogout} />
-      </> : accountsConfigured && <Action secondary={Boolean(onSync)} label="Sign in or create an account" onPress={onAuth} />}
-      <Action secondary label="Allergies and cooking preferences" onPress={onReplayWelcome} />
-    </View>
-  </ScrollView>;
-}
-
 function Field({ label, inputRef, trailing, ...props }: TextInputProps & { label: string; inputRef?: React.RefObject<TextInput | null>; trailing?: ReactNode }) {
   return <View style={{ gap: 5 }}>
     <Copy style={styles.choiceText}>{label}</Copy>
@@ -160,11 +132,6 @@ const styles = StyleSheet.create({
   passwordToggleLabel: { fontFamily: font.medium, fontSize: 12, color: color.secondaryInk },
   accountSwitch: { minHeight: 44, alignItems: 'center', justifyContent: 'center', padding: 8 },
   accountSwitchText: { fontFamily: font.medium, fontSize: 13, textAlign: 'center', color: color.secondaryInk },
-  profileScroll: { padding: 26, paddingBottom: 130, alignItems: 'center' },
-  profile: { width: '100%', maxWidth: 520, gap: 14 },
-  avatar: { width: 57, height: 57, borderRadius: 29, backgroundColor: color.fill, alignItems: 'center', justifyContent: 'center' },
-  profileTitle: { fontFamily: font.display, fontSize: 38, lineHeight: 45, letterSpacing: -1.3 },
-  profileCard: { backgroundColor: color.muted, borderRadius: 21, padding: 16, gap: 10 },
   shareCover: { height: 140, borderRadius: 17, overflow: 'hidden' },
   previewTitle: { fontFamily: font.display, fontSize: 25, lineHeight: 31 },
 });

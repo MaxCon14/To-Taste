@@ -1,6 +1,10 @@
 import { requireSupabase } from './supabase';
 
-export type Cook = { user_id: string; handle: string; name: string; bio: string };
+import type { RecipeDraft } from './recipes';
+
+export type Banner = NonNullable<RecipeDraft['cover']>;
+export type Cook = { user_id: string; handle: string; name: string; bio: string; banner: Banner; website: string; social_link: string };
+const cookFields = 'user_id,handle,name,bio,banner,website,social_link';
 export type CookLookup = { id: string } | { handle: string };
 export type RecipeBook = { id: string; cook_id: string; title: string; post_ids: string[] };
 const bookFields = 'id,cook_id,title,post_ids';
@@ -24,7 +28,7 @@ export async function saveBook(title: string, postIds: string[]) {
 }
 
 export async function readCook(lookup: CookLookup) {
-  const query = requireSupabase().from('cook_profiles').select('user_id,handle,name,bio');
+  const query = requireSupabase().from('cook_profiles').select(cookFields);
   const { data, error } = await ('id' in lookup ? query.eq('user_id', lookup.id) : query.eq('handle', lookup.handle)).maybeSingle<Cook>();
   if (error) throw error;
   return data;
@@ -36,10 +40,10 @@ export async function searchCooks(term: string) {
   return data as Cook[];
 }
 
-export async function saveCook(cook: Omit<Cook, 'user_id'>, edit: boolean, ownerId: string) {
+export async function saveCook(cook: Pick<Cook, 'name' | 'handle' | 'bio'> & Partial<Pick<Cook, 'banner' | 'website' | 'social_link'>>, edit: boolean, ownerId: string) {
   const table = requireSupabase().from('cook_profiles');
   const { data, error } = await (edit ? table.update(cook).eq('user_id', ownerId) : table.insert(cook))
-    .select('user_id,handle,name,bio').single<Cook>();
+    .select(cookFields).single<Cook>();
   if (error?.code === '23505') throw new Error('That handle is already taken. Try another one.');
   if (error) throw new Error('Couldn’t save your public profile. Try again.');
   return data;

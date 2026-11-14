@@ -16,11 +16,12 @@ type Props = {
   onOpen: (id: string) => void; onFavorite: (id: string) => void; onAdd: () => void;
   explore?: boolean; preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
   personalization?: Personalization;
+  savedOnly?: boolean;
   social?: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; loading: boolean; failed: boolean; retry: () => void;
     openRecipe: (recipe: Recipe) => void; openBook: (book: RecipeBook) => void; openCook: (cook: Cook) => void };
 };
 
-export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization, social }: Props) {
+export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization, social, savedOnly = false }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const wide = width >= 850;
   const [query, setQuery] = useState('');
@@ -61,14 +62,13 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           <Copy style={styles.preferenceLabel}>{preference === 'any' ? 'Made for you' : dietOptions[preference]}</Copy>
           <View style={styles.preferenceIcon}><Glyph name="preferences" size={17} color={color.ink} /></View>
         </Pressable>}
-        {!explore && <Copy style={styles.preferenceLabel}>Your personal cookbook</Copy>}
       </View>
     </View>
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
       <View style={styles.content}>
         <View style={[styles.intro, wide && styles.introWide]}>
           <View style={styles.introText}>
-            <Copy accessibilityRole="header" style={[styles.heading, wide && styles.headingWide]}>{following ? 'Following' : explore ? 'Explore' : 'Your recipes'}</Copy>
+            <Copy accessibilityRole="header" style={[styles.heading, wide && styles.headingWide]}>{following ? 'Following' : explore ? 'Explore' : savedOnly ? 'Saved' : 'Your recipes'}</Copy>
             <Copy style={styles.subtitle}>{following ? 'New recipes from cooks you follow.' : explore ? 'A little inspiration. Something delicious.' : 'Good food, worth keeping.'}</Copy>
           </View>
           {wide && <Copy style={styles.edition}>{explore ? 'THE EVERYDAY COLLECTION' : 'YOUR PERSONAL COLLECTION'}</Copy>}
@@ -100,7 +100,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           </Pressable>}
           </View>
           {!explore && <View style={[segmentTrack, wide && styles.wideTabs]}>
-            <Segment label="My recipes" active={filter === 'all'} onPress={() => setFilter('all')} />
+            <Segment label={savedOnly ? 'All saved' : 'My recipes'} active={filter === 'all'} onPress={() => setFilter('all')} />
             <Segment label="Favorites" active={filter === 'favorites'} onPress={() => setFilter('favorites')} />
           </View>}
         </View>
@@ -180,10 +180,10 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           </View>}
           {!visible.length && (!following || (filtered && !social.loading && !social.failed)) && <View style={styles.empty}>
             <View style={styles.emptyIcon}><Glyph name={filter === 'favorites' && !search ? 'heart' : 'book'} size={28} color={color.ink} /></View>
-            <Copy style={styles.listTitle}>{search || explore ? 'Nothing here just yet' : filter === 'favorites' ? 'Keep your favorites close' : 'A home for your recipes'}</Copy>
-            <Copy style={styles.emptyCopy}>{search || explore ? 'Try another ingredient or adjust your filters.' : filter === 'favorites' ? 'Tap the heart on any recipe. Find it here whenever you need it.' : 'Start with a family favorite or a recipe you found online.'}</Copy>
+            <Copy style={styles.listTitle}>{search || explore ? 'Nothing here just yet' : filter === 'favorites' ? 'Keep your favorites close' : savedOnly ? 'No saved recipes yet' : 'A home for your recipes'}</Copy>
+            <Copy style={styles.emptyCopy}>{search || explore ? 'Try another ingredient or adjust your filters.' : filter === 'favorites' ? 'Tap the heart on any recipe. Find it here whenever you need it.' : savedOnly ? 'Save a recipe from Explore to find it here.' : 'Start with a family favorite or a recipe you found online.'}</Copy>
             {explore && <Action secondary label="Clear filters" onPress={() => { setQuery(''); setCollection('All'); setStrict('any'); }} />}
-            {!explore && filter === 'all' && !search && <Action label="Add your first recipe" onPress={onAdd}><Glyph name="plus" color={color.white} /></Action>}
+            {!explore && !savedOnly && filter === 'all' && !search && <Action label="Add your first recipe" onPress={onAdd}><Glyph name="plus" color={color.white} /></Action>}
           </View>}
         </Scene>
         {!!visible.length && <View style={styles.endnote}><View style={styles.endLine} /><Glyph name="ingredients" color={color.soft} size={15} /><View style={styles.endLine} /></View>}

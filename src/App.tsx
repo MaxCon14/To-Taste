@@ -19,7 +19,8 @@ import { featuredRecipes, lines, type Diet, type Recipe, type RecipeDraft } from
 import { ShoppingList } from './ShoppingList';
 import type { ShoppingItem } from './shopping';
 import { Action, color, Copy, font } from './ui';
-import { DietSheet, Profile, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
+import { Glyph } from './Glyph';
+import { DietSheet, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
 import { AccountAccess } from './AccountAccess';
 import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readFollowingRecipes, readPublications, readSession, savePersonalization, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
 import { exchangeAuthCallback, requestAccountDeletion, restoreNativeCallback, signInWithProvider } from './accountAuth';
@@ -84,6 +85,9 @@ function Cookbook() {
   const [guestRecipes, setGuestRecipes] = useState<Recipe[]>([]);
   const [syncPrompt, setSyncPrompt] = useState(false);
   const [accountSettings, setAccountSettings] = useState(false);
+  const [signInSettings, setSignInSettings] = useState(false);
+  const [profileSection, setProfileSection] = useState<'posts' | 'recipes' | 'books'>('posts');
+  const [profileRevision, setProfileRevision] = useState(0);
   const [deletePrompt, setDeletePrompt] = useState(false);
   const transfer = useSubmission();
   const settings = useSubmission();
@@ -334,6 +338,7 @@ function Cookbook() {
     setSelected(undefined);
     setForm(undefined);
     forgetPost(id);
+    setProfileRevision(value => value + 1);
     refreshCommunity();
   }
 
@@ -472,6 +477,8 @@ function Cookbook() {
     setForm(undefined);
     setSyncPrompt(false);
     setAccountSettings(false);
+    setSignInSettings(false);
+    setProfileSection('posts');
     setDeletePrompt(false);
     setPublished({});
     setNotice(undefined);
@@ -586,7 +593,8 @@ function Cookbook() {
       </View>
       <View style={[styles.safe, !libraryActive && styles.inactiveTab]} pointerEvents={libraryActive ? 'auto' : 'none'}
         aria-hidden={!libraryActive} importantForAccessibility={libraryActive ? 'auto' : 'no-hide-descendants'}>
-        <Library active={libraryActive} recipes={recipes} filter={filter} setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
+        <Library active={libraryActive} recipes={recipes.filter(recipe => recipe.favorite || !!recipe.discovery || recipe.id.startsWith('community:'))}
+          savedOnly filter={filter} setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
           personalization={account.personalization}
           preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)} />
       </View>
@@ -599,10 +607,12 @@ function Cookbook() {
         onRemove={(ids) => void updateShopping((current) => current.filter((item) => !ids.has(item.id)))}
         onClearChecked={() => void updateShopping((current) => current.filter((item) => !item.checked))}
         onExplore={() => changeTab('explore')} />}
-      {tab === 'profile' && <Scene style={styles.safe}><Profile account={account} diet={preference} onDiet={() => setDietSheet(true)} onAuth={() => setAuth(true)} onLogout={() => void logout()}
-        onPublicProfile={() => setCook({ id: account.id })}
-        onSync={guestRecipes.length ? () => account ? setSyncPrompt(true) : setAuth(true) : undefined}
-        onSettings={() => setAccountSettings(true)} onReplayWelcome={() => setOnboarding(true)} /></Scene>}
+      {tab === 'profile' && <Scene style={styles.safe}><CookProfile lookup={{ id: account.id }} account={account}
+        edit={() => setEditCook(true)} openRecipe={openSocialRecipe}
+        followChanged={() => setFollowRevision(value => value + 1)} openBook={setBook} createBook={() => setCreatingBook(true)}
+        personal={{ recipes: recipes.filter(recipe => !recipe.discovery && !recipe.id.startsWith('community:')),
+          open: setSelected, add: () => setAddMenu(true), settings: () => setAccountSettings(true),
+          revision: profileRevision, section: profileSection, setSection: setProfileSection }} /></Scene>}
     </SafeAreaView>
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
       onAuthor={activeRecipe.discovery?.authorId ? () => setCook({ id: activeRecipe.discovery!.authorId! }) : undefined}
@@ -623,11 +633,13 @@ function Cookbook() {
     {editCook && <EditCook account={account} close={() => setEditCook(false)} saved={profile => {
       applyCookProfile(profile);
       setEditCook(false);
-      setCook({ id: account.id });
+      setProfileRevision(value => value + 1);
     }} />}
     {book && <BookSheet book={book} close={() => setBook(undefined)} openRecipe={openSocialRecipe} />}
     {creatingBook && <CreateBook userId={account.id} close={() => setCreatingBook(false)} saved={() => {
       setCreatingBook(false);
+      setProfileRevision(value => value + 1);
+      setProfileSection('books');
       setNotice({ text: 'Recipe book published' });
     }} />}
     {notice && <View style={[styles.notice, notice.error && styles.noticeError]}>
@@ -656,19 +668,31 @@ function Cookbook() {
         <Action secondary label="Add only the recipe I’m sharing" disabled={transfer.busy} onPress={() => void transfer.run(() => syncGuest(share))} />}
       <Action secondary label="Maybe later" disabled={transfer.busy} onPress={postponeSync} />
     </Sheet>}
-    {accountSettings && account && !deletePrompt && <Sheet title="Account" busy={settings.busy} close={() => setAccountSettings(false)}>
+    {accountSettings && !signInSettings && !deletePrompt && <Sheet title="Settings" close={() => setAccountSettings(false)}>
+      <Copy accessibilityRole="header" style={styles.settingsHeading}>Account</Copy>
+      <View style={styles.settingsGroup}>
+        <SettingsRow label="Sign-in methods" icon="profile" onPress={() => setSignInSettings(true)} />
+        {guestRecipes.length > 0 && <SettingsRow label="Sync recipes from this device" icon="book" onPress={() => { setAccountSettings(false); setSyncPrompt(true); }} />}
+      </View>
+      <Copy accessibilityRole="header" style={styles.settingsHeading}>Preferences</Copy>
+      <View style={styles.settingsGroup}>
+        <SettingsRow label="Diet, allergens, and cooking style" icon="preferences" onPress={() => { setAccountSettings(false); setOnboarding(true); }} />
+      </View>
+      <Action secondary label="Sign out" onPress={() => void settings.run(logout)} disabled={settings.busy} />
+      <Action secondary label="Delete account" onPress={() => setDeletePrompt(true)} disabled={settings.busy} />
+    </Sheet>}
+    {accountSettings && signInSettings && !deletePrompt && <Sheet title="Sign-in methods" busy={settings.busy} close={() => setSignInSettings(false)}>
       <Copy>Add a sign-in method to the account you’re using now.</Copy>
       {(['apple', 'google'] as const).map(provider => <Action key={provider} secondary label={provider === 'apple' ? 'Link Apple' : 'Link Google'}
         disabled={settings.busy} onPress={() => void settings.run(async () => {
           await prepareAuth('link');
           if (await signInWithProvider(provider, true)) {
             await AsyncStorage.removeItem(intentKey);
-            setAccountSettings(false);
+            setSignInSettings(false);
             setNotice({ text: 'Sign-in method updated' });
           }
         })} />)}
       {settings.error ? <Copy accessibilityRole="alert">{settings.error}</Copy> : null}
-      <Action secondary label="Delete account" disabled={settings.busy} onPress={() => setDeletePrompt(true)} />
     </Sheet>}
     {deletePrompt && account && <Sheet title="Delete your account?" busy={deletion.busy} close={() => setDeletePrompt(false)}>
       <Copy>This permanently deletes your account, cloud cookbook, and published recipes. Shopping lists and guest recipes on this device stay here.</Copy>
@@ -687,6 +711,7 @@ function Cookbook() {
         await unpublishRecipe(account.id, shareRecipe.id);
         forgetPost(shareRecipe.id);
         setShare(undefined);
+        setProfileRevision(value => value + 1);
         setNotice({ text: 'Removed from Explore' });
         refreshCommunity();
       }}
@@ -699,10 +724,19 @@ function Cookbook() {
         }
         setPublished((posts) => ({ ...posts, [shareRecipe.id]: { diet, onePan, weekend } }));
         setShare(undefined);
+        setProfileRevision(value => value + 1);
         setNotice({ text: 'Shared with the community' });
         refreshCommunity();
       }} />}
   </>;
+}
+
+function SettingsRow({ label, icon, onPress }: { label: string; icon: 'profile' | 'book' | 'preferences'; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingsRow}>
+    <Glyph name={icon} color={color.ink} size={19} />
+    <Copy style={styles.settingsLabel}>{label}</Copy>
+    <Glyph name="forward" color={color.secondaryInk} size={16} />
+  </Pressable>;
 }
 
 const draftKey = (account: Account | null) => `pinch.draft.v1.${account?.id ?? 'guest'}`;
@@ -712,6 +746,10 @@ async function readDraft(account: Account | null): Promise<FormState | undefined
 }
 
 const styles = StyleSheet.create({
+  settingsHeading: { color: color.secondaryInk, fontFamily: font.medium, fontSize: 14 },
+  settingsGroup: { backgroundColor: color.muted, borderRadius: 16, overflow: 'hidden' },
+  settingsRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: color.rule },
+  settingsLabel: { flex: 1, fontFamily: font.medium },
   safe: { flex: 1, backgroundColor: color.paper },
   inactiveTab: { display: 'none' },
   covered: { display: 'none' },

@@ -20,6 +20,7 @@ import Trash2 from 'lucide-react-native/icons/trash-2';
 import Utensils from 'lucide-react-native/icons/utensils';
 import X from 'lucide-react-native/icons/x';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
+import Settings from 'lucide-react-native/icons/settings';
 
 const symbols = {
   back: ['chevron.left', ChevronLeft],
@@ -44,6 +45,7 @@ const symbols = {
   shopping: ['basket', ShoppingBasket],
   trash: ['trash', Trash2],
   preferences: ['slider.horizontal.3', SlidersHorizontal],
+  settings: ['gearshape', Settings],
 } as const satisfies Record<string, readonly [SymbolViewProps['name'], unknown]>;
 
 export function Glyph({ name, color, size = 18 }: { name: keyof typeof symbols; color: string; size?: number }) {
