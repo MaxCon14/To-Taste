@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -542,7 +542,8 @@ function Cookbook() {
     {!activeRecipe && <GlassNav tab={tab} onChange={changeTab} onAdd={() => setAddMenu(true)} adding={addMenu || Boolean(form)} />}
     {addMenu && <Sheet title="Add a recipe" close={() => setAddMenu(false)}>
       {draft && <Action label="Resume draft" onPress={() => startForm(draft)} />}
-      <RecipeOption title="Import link" description="Bring a recipe you love into To Taste." icon="link" onPress={() => startForm({ mode: 'import' })} />
+      {!(process.env.EXPO_PUBLIC_STATIC_PREVIEW === '1' && Platform.OS === 'web') &&
+        <RecipeOption title="Import link" description="Bring a recipe you love into To Taste." icon="link" onPress={() => startForm({ mode: 'import' })} />}
       <RecipeOption title="Write a recipe" description="Your ingredients. Your way." icon="edit" onPress={() => startForm({ mode: 'manual' })} />
     </Sheet>}
     {form && <RecipeForm state={form} close={() => setForm(undefined)} save={save} remove={remove} onDraft={form.id ? undefined : rememberDraft} />}

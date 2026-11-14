@@ -69,7 +69,7 @@ export async function signInWithProvider(provider: Provider, linking = false) {
   if (provider === 'apple' && Platform.OS === 'ios' && await Apple.isAvailableAsync()) {
     const nonce = Crypto.randomUUID();
     const hashed = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, nonce);
-    const result = await Apple.signInAsync({ nonce: hashed });
+    const result = await Apple.signInAsync({ nonce: hashed, requestedScopes: [Apple.AppleAuthenticationScope.EMAIL] });
     if (!result.identityToken) throw new Error('Apple didn’t return a sign-in token. Try again.');
     const payload = { provider, token: result.identityToken, nonce } as const;
     const { error } = linking ? await client.auth.linkIdentity(payload) : await client.auth.signInWithIdToken(payload);
