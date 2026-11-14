@@ -336,6 +336,7 @@ function Cookbook() {
   async function finishWelcome() {
     await AsyncStorage.setItem(welcomeKey, '1');
     setTab('explore');
+    setShowDietPrompt(false);
     setOnboarding(false);
   }
 
@@ -480,7 +481,10 @@ function Cookbook() {
       if (onboarding) void finishWelcome().catch(showError);
     }} />;
   if (onboarding) return <>
-    <Onboarding explore={() => { void finishWelcome().catch(showError); }}
+    <Onboarding initialDiet={preference} explore={async (diet) => {
+      if (diet !== undefined) await saveDiet(diet);
+      await finishWelcome();
+    }}
       signIn={accountsConfigured ? () => setAuth(true) : undefined} />
     {notice?.error && <View style={[styles.notice, styles.noticeError]}><Copy accessibilityRole="alert">{notice.text}</Copy></View>}
     {authSheet}
