@@ -50,6 +50,17 @@ export async function savePersonalization(preferences: Personalization) {
   if (error) throw error;
 }
 
+export type AppFeedback = { kind: 'feedback' | 'help'; message: string } | { kind: 'rating'; rating: number };
+
+export async function submitAppFeedback(submission: AppFeedback) {
+  const { error } = await requireSupabase().from('app_feedback').insert({
+    kind: submission.kind,
+    message: submission.kind === 'rating' ? null : submission.message,
+    rating: submission.kind === 'rating' ? submission.rating : null,
+  });
+  if (error) throw new Error('We couldn’t send this right now. Try again in a moment.');
+}
+
 export async function saveProfile(id: string, values: { display_name?: string; diet?: Diet }): Promise<Account> {
   const { data, error } = await requireSupabase().from('profiles').upsert({ user_id: id, ...values }, { onConflict: 'user_id' })
     .select('display_name,diet').single();

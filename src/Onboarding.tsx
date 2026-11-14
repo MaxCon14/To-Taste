@@ -49,17 +49,35 @@ export function AllergenChoices({ selected, choose }: { selected: Allergen[] | n
   </View>;
 }
 
-export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, complete, edit = false, cancel }: {
-  accountId?: string; signIn?: () => void; initialDiet: Diet; initial?: Personalization; recipes: Recipe[];
-  complete: (diet: Diet, preferences: Personalization) => Promise<void>; edit?: boolean; cancel?: () => void;
+export function DietPreferenceChoices({ selected, choose }: { selected: Diet | null; choose: (value: Diet) => void }) {
+  return <View accessibilityRole="radiogroup" accessibilityLabel="Diet" style={styles.choices}>
+    {(Object.keys(dietOptions) as Diet[]).map(item => <PreferenceChoice single key={item}
+      label={dietOptions[item]} symbol={dietIcons[item]} active={selected === item} onPress={() => choose(item)} />)}
+  </View>;
+}
+
+export function CookingChoices({ selected, choose }: { selected: PreferredCookingStyle[] | null; choose: (values: PreferredCookingStyle[]) => void }) {
+  return <View style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
+    <PreferenceChoice featured key={item} label={cookingStyles[item]} symbol={cookingIcons[item]}
+      active={item === 'any' ? selected?.length === 0 : selected?.includes(item) ?? false}
+      onPress={() => {
+        const current = selected ?? [];
+        if (item === 'any') choose([]);
+        else choose(current.includes(item) ? current.filter(value => value !== item) : [...current, item]);
+      }} />)}</View>;
+}
+
+export function Onboarding({ accountId, signIn, recipes, complete }: {
+  accountId?: string; signIn?: () => void; recipes: Recipe[];
+  complete: (diet: Diet, preferences: Personalization) => Promise<void>;
 }) {
   const [step, setStep] = useState(accountId ? 3 : 1);
-  const [restored, setRestored] = useState(!accountId || edit);
-  const [selected, setSelected] = useState<Allergen[] | null>(initial?.allergens ?? null);
-  const [diet, setDiet] = useState<Diet | null>(edit ? initialDiet : null);
-  const [cooking, setCooking] = useState<PreferredCookingStyle[] | null>(initial?.cooking ?? null);
+  const [restored, setRestored] = useState(!accountId);
+  const [selected, setSelected] = useState<Allergen[] | null>(null);
+  const [diet, setDiet] = useState<Diet | null>(null);
+  const [cooking, setCooking] = useState<PreferredCookingStyle[] | null>(null);
   const { busy, error, run } = useSubmission();
-  const draftKey = accountId && !edit ? `to-taste.onboarding.${accountId}` : undefined;
+  const draftKey = accountId ? `to-taste.onboarding.${accountId}` : undefined;
   useEffect(() => {
     if (!draftKey) return;
     let active = true;
@@ -108,23 +126,13 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         {visibleStep === 4 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>How do you usually eat?</Copy>
           <Copy style={styles.description}>Choose one diet preference to see more recipes that suit you.</Copy>
-          <View accessibilityRole="radiogroup" accessibilityLabel="Diet" style={styles.choices}>
-            {(Object.keys(dietOptions) as Diet[]).map(item => <PreferenceChoice single key={item}
-              label={dietOptions[item]} symbol={dietIcons[item]} active={diet === item} onPress={() => setDiet(item)} />)}
-          </View>
+          <DietPreferenceChoices selected={diet} choose={setDiet} />
           <Action label="Continue" disabled={diet === null} onPress={() => setStep(5)} />
         </>}
         {visibleStep === 5 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you like to cook?</Copy>
           <Copy style={styles.description}>Select all the meals you’d like to see more often, or choose No preference.</Copy>
-          <View style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
-            <PreferenceChoice featured key={item} label={cookingStyles[item]} symbol={cookingIcons[item]}
-              active={item === 'any' ? cooking?.length === 0 : cooking?.includes(item) ?? false}
-              onPress={() => setCooking(current => {
-                if (item === 'any') return [];
-                const choices = current ?? [];
-                return choices.includes(item) ? choices.filter(choice => choice !== item) : [...choices, item];
-              })} />)}</View>
+          <CookingChoices selected={cooking} choose={setCooking} />
           <Action label="See your recommendations" disabled={cooking === null} onPress={() => setStep(6)} />
         </>}
         {visibleStep === 6 && restored && <>
@@ -146,7 +154,6 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         {error ? <Copy accessibilityRole="alert" style={styles.warning}>{error}</Copy> : null}
         {!restored && <Copy accessibilityLiveRegion="polite">Opening your preferences…</Copy>}
         {visibleStep > 3 && <Action secondary label="Back" disabled={busy} onPress={() => setStep(visibleStep - 1)} />}
-        {cancel && <Action secondary label="Cancel edits" disabled={busy} onPress={cancel} />}
       </Scene>
     </ScrollView>
   </SafeAreaView>;

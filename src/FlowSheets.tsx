@@ -15,16 +15,18 @@ export function RecipeOption({ title, description, icon, onPress }: { title: str
   </Pressable>;
 }
 
-export function Sheet({ title, close, children, busy = false }: { title: string; close?: () => void; children: ReactNode; busy?: boolean }) {
+export function Sheet({ title, close, back, children, busy = false }: { title: string; close?: () => void; back?: () => void; children: ReactNode; busy?: boolean }) {
   const insets = useSafeAreaInsets();
   const motion = useSceneMotion(true, 24);
   const reduced = useReducedMotion();
-  const dismiss = () => { if (!busy && close) motion.exit(close); };
+  const finish = close ?? back;
+  const dismiss = () => { if (!busy && finish) motion.exit(finish); };
   return <Modal visible transparent onRequestClose={dismiss} animationType={reduced ? 'none' : 'fade'}>
     <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Pressable accessible={false} onPress={dismiss} style={StyleSheet.absoluteFill} />
       <Animated.View accessibilityViewIsModal style={[motion.style, styles.sheet, { paddingBottom: Math.max(14, insets.bottom), marginTop: insets.top }]}>
         <View style={styles.sheetHeader}>
+          {back && <IconButton label="Back to Settings" disabled={busy} onPress={back}><Glyph name="back" color={color.ink} /></IconButton>}
           <Copy accessibilityRole="header" style={styles.sheetTitle}>{title}</Copy>
           {close && <IconButton label="Close" disabled={busy} onPress={dismiss}><Glyph name="close" color={color.ink} /></IconButton>}
         </View>
@@ -102,10 +104,10 @@ export function ShareSheet({ recipe, account, close, share, published, unpublish
   </Sheet>;
 }
 
-function Field({ label, inputRef, trailing, ...props }: TextInputProps & { label: string; inputRef?: React.RefObject<TextInput | null>; trailing?: ReactNode }) {
+export function Field({ label, inputRef, trailing, style, ...props }: TextInputProps & { label: string; inputRef?: React.RefObject<TextInput | null>; trailing?: ReactNode }) {
   return <View style={{ gap: 5 }}>
     <Copy style={styles.choiceText}>{label}</Copy>
-    <View style={styles.fieldRow}><TextInput ref={inputRef} {...props} accessibilityLabel={label} placeholderTextColor={color.soft} style={[styles.field, { flex: 1, minWidth: 0 }]} />{trailing}</View>
+    <View style={styles.fieldRow}><TextInput ref={inputRef} {...props} accessibilityLabel={label} placeholderTextColor={color.soft} style={[styles.field, { flex: 1, minWidth: 0 }, style]} />{trailing}</View>
   </View>;
 }
 

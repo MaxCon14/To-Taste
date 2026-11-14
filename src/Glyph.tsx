@@ -9,6 +9,11 @@ import UserRound from 'lucide-react-native/icons/user-round';
 import Share from 'lucide-react-native/icons/share';
 import Timer from 'lucide-react-native/icons/timer';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import CircleHelp from 'lucide-react-native/icons/circle-help';
+import Leaf from 'lucide-react-native/icons/leaf';
+import MessageSquare from 'lucide-react-native/icons/message-square';
+import Shield from 'lucide-react-native/icons/shield';
 import Heart from 'lucide-react-native/icons/heart';
 import Star from 'lucide-react-native/icons/star';
 import Link2 from 'lucide-react-native/icons/link-2';
@@ -24,6 +29,11 @@ import Settings from 'lucide-react-native/icons/settings';
 
 const symbols = {
   back: ['chevron.left', ChevronLeft],
+  next: ['chevron.right', ChevronRight],
+  help: ['questionmark.circle', CircleHelp],
+  diet: ['leaf', Leaf],
+  feedback: ['bubble.left', MessageSquare],
+  allergens: ['shield', Shield],
   book: ['book', BookOpen],
   check: ['checkmark', Check],
   explore: ['safari', Compass],

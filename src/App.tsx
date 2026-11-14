@@ -12,14 +12,14 @@ import { Onboarding } from './Onboarding';
 import { CookProfile, EditCook } from './CookProfiles';
 import { BookSheet, CreateBook } from './RecipeBooks';
 import type { Cook, CookLookup, RecipeBook } from './socialApi';
-import type { Personalization } from './allergens';
+import { cookingStyles, type Personalization } from './allergens';
+import { PreferenceSettings, SettingsGroup, SettingsRow, SupportSettings, type PreferencePage, type SupportPage } from './Settings';
 import { RecipeForm, type FormState } from './RecipeForm';
 import { RecipeScreen } from './RecipeScreen';
-import { featuredRecipes, lines, type Diet, type Recipe, type RecipeDraft } from './recipes';
+import { dietOptions, featuredRecipes, lines, type Diet, type Recipe, type RecipeDraft } from './recipes';
 import { ShoppingList } from './ShoppingList';
 import type { ShoppingItem } from './shopping';
 import { Action, color, Copy, font } from './ui';
-import { Glyph } from './Glyph';
 import { DietSheet, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
 import { AccountAccess } from './AccountAccess';
 import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readFollowingRecipes, readPublications, readSession, savePersonalization, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
@@ -85,6 +85,7 @@ function Cookbook() {
   const [guestRecipes, setGuestRecipes] = useState<Recipe[]>([]);
   const [syncPrompt, setSyncPrompt] = useState(false);
   const [accountSettings, setAccountSettings] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<PreferencePage | SupportPage>();
   const [signInSettings, setSignInSettings] = useState(false);
   const [profileSection, setProfileSection] = useState<'posts' | 'recipes' | 'books'>('posts');
   const [profileRevision, setProfileRevision] = useState(0);
@@ -372,15 +373,24 @@ function Cookbook() {
     setShowDietPrompt(false);
   }
 
-  async function finishWelcome(diet: Diet, personalization: Personalization) {
+  async function updatePersonalization(patch: Partial<Personalization>) {
     const owner = accountRef.current;
     if (!owner) throw new Error('Sign in to save your preferences.');
-    await saveDiet(diet);
+    const personalization = { allergens: [], cooking: [], ...owner.personalization, ...patch };
     await savePersonalization(personalization);
     if (accountRef.current?.id !== owner.id) return;
     const updated = { ...accountRef.current, personalization };
     accountRef.current = updated;
     setAccount(updated);
+  }
+
+  async function finishWelcome(diet: Diet, personalization: Personalization) {
+    const owner = accountRef.current;
+    if (!owner) throw new Error('Sign in to save your preferences.');
+    await saveDiet(diet);
+    if (accountRef.current?.id !== owner.id) return;
+    await updatePersonalization(personalization);
+    if (accountRef.current?.id !== owner.id) return;
     setTab('explore');
     setShowDietPrompt(false);
     setOnboarding(false);
@@ -477,6 +487,7 @@ function Cookbook() {
     setForm(undefined);
     setSyncPrompt(false);
     setAccountSettings(false);
+    setSettingsPage(undefined);
     setSignInSettings(false);
     setProfileSection('posts');
     setDeletePrompt(false);
@@ -547,9 +558,7 @@ function Cookbook() {
 
   const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError} />;
   if (onboarding || !account) return <>
-    <Onboarding key={account?.id ?? 'signup'} accountId={account?.id} initialDiet={preference} initial={account?.personalization} recipes={discoveries}
-      edit={!!account?.personalization} complete={finishWelcome}
-      cancel={account?.personalization ? () => setOnboarding(false) : undefined}
+    <Onboarding key={account?.id ?? 'signup'} accountId={account?.id} recipes={discoveries} complete={finishWelcome}
       signIn={accountsConfigured && !account ? () => setAuth(true) : undefined} />
     {notice?.error && <View style={[styles.notice, styles.noticeError]}><Copy accessibilityRole="alert">{notice.text}</Copy></View>}
     {authSheet}
@@ -668,20 +677,35 @@ function Cookbook() {
         <Action secondary label="Add only the recipe I’m sharing" disabled={transfer.busy} onPress={() => void transfer.run(() => syncGuest(share))} />}
       <Action secondary label="Maybe later" disabled={transfer.busy} onPress={postponeSync} />
     </Sheet>}
-    {accountSettings && !signInSettings && !deletePrompt && <Sheet title="Settings" close={() => setAccountSettings(false)}>
-      <Copy accessibilityRole="header" style={styles.settingsHeading}>Account</Copy>
-      <View style={styles.settingsGroup}>
+    {accountSettings && !settingsPage && !signInSettings && !deletePrompt && <Sheet title="Settings" busy={settings.busy} close={() => setAccountSettings(false)}>
+      <SettingsGroup title="Account">
         <SettingsRow label="Sign-in methods" icon="profile" onPress={() => setSignInSettings(true)} />
         {guestRecipes.length > 0 && <SettingsRow label="Sync recipes from this device" icon="book" onPress={() => { setAccountSettings(false); setSyncPrompt(true); }} />}
-      </View>
-      <Copy accessibilityRole="header" style={styles.settingsHeading}>Preferences</Copy>
-      <View style={styles.settingsGroup}>
-        <SettingsRow label="Diet, allergens, and cooking style" icon="preferences" onPress={() => { setAccountSettings(false); setOnboarding(true); }} />
-      </View>
+      </SettingsGroup>
+      <SettingsGroup title="Preferences">
+        <SettingsRow label="Diet" icon="diet" value={dietOptions[account.diet]} onPress={() => setSettingsPage('diet')} />
+        <SettingsRow label="Allergens" icon="allergens"
+          value={account.personalization?.allergens.length ? `${account.personalization.allergens.length} selected` : 'None'}
+          onPress={() => setSettingsPage('allergens')} />
+        <SettingsRow label="Cooking style" icon="preferences"
+          value={account.personalization?.cooking.length === 1 ? cookingStyles[account.personalization.cooking[0]]
+            : account.personalization?.cooking.length ? `${account.personalization.cooking.length} selected` : cookingStyles.any}
+          onPress={() => setSettingsPage('cooking')} />
+      </SettingsGroup>
+      <SettingsGroup title="Support">
+        <SettingsRow label="Give feedback" icon="feedback" onPress={() => setSettingsPage('feedback')} />
+        <SettingsRow label="Rate To Taste" icon="star" onPress={() => setSettingsPage('rating')} />
+        <SettingsRow label="Help" icon="help" onPress={() => setSettingsPage('help')} />
+      </SettingsGroup>
       <Action secondary label="Sign out" onPress={() => void settings.run(logout)} disabled={settings.busy} />
       <Action secondary label="Delete account" onPress={() => setDeletePrompt(true)} disabled={settings.busy} />
     </Sheet>}
-    {accountSettings && signInSettings && !deletePrompt && <Sheet title="Sign-in methods" busy={settings.busy} close={() => setSignInSettings(false)}>
+    {accountSettings && (settingsPage === 'diet' || settingsPage === 'allergens' || settingsPage === 'cooking') &&
+      <PreferenceSettings key={settingsPage} page={settingsPage} initialDiet={account.diet} initial={account.personalization ?? { allergens: [], cooking: [] }}
+        back={() => setSettingsPage(undefined)} saveDiet={saveDiet} savePreferences={updatePersonalization} />}
+    {accountSettings && (settingsPage === 'feedback' || settingsPage === 'rating' || settingsPage === 'help') &&
+      <SupportSettings key={settingsPage} page={settingsPage} back={() => setSettingsPage(undefined)} />}
+    {accountSettings && signInSettings && !deletePrompt && <Sheet title="Sign-in methods" busy={settings.busy} back={() => setSignInSettings(false)}>
       <Copy>Add a sign-in method to the account you’re using now.</Copy>
       {(['apple', 'google'] as const).map(provider => <Action key={provider} secondary label={provider === 'apple' ? 'Link Apple' : 'Link Google'}
         disabled={settings.busy} onPress={() => void settings.run(async () => {
@@ -731,14 +755,6 @@ function Cookbook() {
   </>;
 }
 
-function SettingsRow({ label, icon, onPress }: { label: string; icon: 'profile' | 'book' | 'preferences'; onPress: () => void }) {
-  return <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingsRow}>
-    <Glyph name={icon} color={color.ink} size={19} />
-    <Copy style={styles.settingsLabel}>{label}</Copy>
-    <Glyph name="forward" color={color.secondaryInk} size={16} />
-  </Pressable>;
-}
-
 const draftKey = (account: Account | null) => `pinch.draft.v1.${account?.id ?? 'guest'}`;
 async function readDraft(account: Account | null): Promise<FormState | undefined> {
   const value = await AsyncStorage.getItem(draftKey(account));
@@ -746,10 +762,6 @@ async function readDraft(account: Account | null): Promise<FormState | undefined
 }
 
 const styles = StyleSheet.create({
-  settingsHeading: { color: color.secondaryInk, fontFamily: font.medium, fontSize: 14 },
-  settingsGroup: { backgroundColor: color.muted, borderRadius: 16, overflow: 'hidden' },
-  settingsRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: color.rule },
-  settingsLabel: { flex: 1, fontFamily: font.medium },
   safe: { flex: 1, backgroundColor: color.paper },
   inactiveTab: { display: 'none' },
   covered: { display: 'none' },
