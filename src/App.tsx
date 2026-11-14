@@ -24,7 +24,6 @@ import { monitorSession } from './supabase';
 const storageKey = 'pinch.recipes.v1';
 const preferenceKey = 'pinch.preference.v1';
 const shoppingKey = 'pinch.shopping.v1';
-const welcomeKey = 'to-taste.welcome.v1';
 const intentKey = 'to-taste.auth-intent.v1';
 
 type Notice = { text: string; undo?: () => void; viewList?: boolean; error?: boolean; persistent?: boolean };
@@ -110,9 +109,8 @@ function Cookbook() {
         return null;
       }),
       AsyncStorage.getItem(shoppingKey),
-      AsyncStorage.getItem(welcomeKey),
       AsyncStorage.getItem(intentKey),
-    ]).then(async ([saved, localDiet, session, storedShopping, welcomed, pendingIntent]) => {
+    ]).then(async ([saved, localDiet, session, storedShopping, pendingIntent]) => {
       const data: unknown = saved === null ? [] : JSON.parse(saved);
       if (!Array.isArray(data) || !data.every((recipe) => recipe
         && typeof recipe.id === 'string' && typeof recipe.title === 'string' && typeof recipe.ingredients === 'string'
@@ -120,6 +118,7 @@ function Cookbook() {
         throw new Error('Invalid recipe data');
       }
       const user = session?.user ?? null;
+      const intent = pendingIntent ? parseIntent(pendingIntent) : null;
       const savedDraft = await readDraft(user);
       if (!active) return;
       const savedShopping: unknown = storedShopping ? JSON.parse(storedShopping) : [];
@@ -136,11 +135,11 @@ function Cookbook() {
       setRecipes(latest.current);
       setDraft(savedDraft);
       setGuestRecipes(data);
+      setOnboarding(!(user && intent));
       setShowDietPrompt(!localDiet && (!user || user.diet === 'any'));
       if (user) {
         setPreference(user.diet);
         if (pendingIntent) {
-          const intent = parseIntent(pendingIntent);
           restoreIntent(intent);
           if (intent?.kind === 'access') setSyncPrompt(data.length > 0);
           else if (intent?.kind === 'link') setNotice({ text: 'Sign-in method updated' });
@@ -148,9 +147,7 @@ function Cookbook() {
         }
       }
       else if (localDiet === 'any' || localDiet === 'vegan' || localDiet === 'vegetarian' || localDiet === 'pescatarian') setPreference(localDiet);
-      if (!user && !welcomed && !localDiet && !data.length && !savedDraft) setOnboarding(true);
       if (!user && pendingIntent) {
-        const intent = parseIntent(pendingIntent);
         if (intent?.kind === 'access') {
           restoreIntent(intent);
           setAuth(true);
@@ -334,7 +331,6 @@ function Cookbook() {
   }
 
   async function finishWelcome() {
-    await AsyncStorage.setItem(welcomeKey, '1');
     setTab('explore');
     setShowDietPrompt(false);
     setOnboarding(false);
@@ -384,7 +380,6 @@ function Cookbook() {
     if (intent) restoreIntent(parseIntent(intent));
     if (wasGuest && guest.length) setSyncPrompt(true);
     await AsyncStorage.removeItem(intentKey);
-    await AsyncStorage.setItem(welcomeKey, '1');
   }
 
   async function syncGuest(onlyId?: string) {
@@ -485,7 +480,7 @@ function Cookbook() {
       if (diet !== undefined) await saveDiet(diet);
       await finishWelcome();
     }}
-      signIn={accountsConfigured ? () => setAuth(true) : undefined} />
+      signIn={accountsConfigured && !account ? () => setAuth(true) : undefined} />
     {notice?.error && <View style={[styles.notice, styles.noticeError]}><Copy accessibilityRole="alert">{notice.text}</Copy></View>}
     {authSheet}
   </>;
