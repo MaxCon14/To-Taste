@@ -15,18 +15,18 @@ export function RecipeOption({ title, description, icon, onPress }: { title: str
   </Pressable>;
 }
 
-export function Sheet({ title, close, children, busy = false }: { title: string; close: () => void; children: ReactNode; busy?: boolean }) {
+export function Sheet({ title, close, children, busy = false }: { title: string; close?: () => void; children: ReactNode; busy?: boolean }) {
   const insets = useSafeAreaInsets();
   const motion = useSceneMotion(true, 24);
   const reduced = useReducedMotion();
-  const dismiss = () => { if (!busy) motion.exit(close); };
+  const dismiss = () => { if (!busy && close) motion.exit(close); };
   return <Modal visible transparent onRequestClose={dismiss} animationType={reduced ? 'none' : 'fade'}>
     <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Pressable accessible={false} onPress={dismiss} style={StyleSheet.absoluteFill} />
       <Animated.View accessibilityViewIsModal style={[motion.style, styles.sheet, { paddingBottom: Math.max(14, insets.bottom), marginTop: insets.top }]}>
         <View style={styles.sheetHeader}>
           <Copy accessibilityRole="header" style={styles.sheetTitle}>{title}</Copy>
-          <IconButton label="Close" disabled={busy} onPress={dismiss}><Glyph name="close" color={color.ink} /></IconButton>
+          {close && <IconButton label="Close" disabled={busy} onPress={dismiss}><Glyph name="close" color={color.ink} /></IconButton>}
         </View>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetContent}>{children}</ScrollView>
       </Animated.View>

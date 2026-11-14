@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Glyph } from './Glyph';
@@ -7,6 +7,8 @@ import { MotionPressable as Pressable, Scene } from './motion';
 import { dietOptions, lines, matchesDiet, type Diet, type Recipe } from './recipes';
 import { warningLabels, type Personalization } from './allergens';
 import { recipeRecommendations } from './recipeRecommendations';
+import { ExploreResults } from './RecipeBooks';
+import type { Cook, RecipeBook } from './socialApi';
 
 export type Filter = 'all' | 'favorites';
 type Props = {
@@ -14,19 +16,22 @@ type Props = {
   onOpen: (id: string) => void; onFavorite: (id: string) => void; onAdd: () => void;
   explore?: boolean; preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
   personalization?: Personalization;
-  social?: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; find: () => void; loading: boolean; failed: boolean; retry: () => void };
+  social?: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; loading: boolean; failed: boolean; retry: () => void;
+    openRecipe: (recipe: Recipe) => void; openBook: (book: RecipeBook) => void; openCook: (cook: Cook) => void };
 };
 
 export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization, social }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const wide = width >= 850;
   const [query, setQuery] = useState('');
+  const searchInput = useRef<TextInput>(null);
   const [searchFocused, setSearchFocused] = useState(false);
   const [collection, setCollection] = useState('All');
   const [strict, setStrict] = useState<Diet>('any');
   const [showFilters, setShowFilters] = useState(false);
   const activeFilters = Number(collection !== 'All') + Number(strict !== 'any');
   const search = query.trim().toLowerCase();
+  const globalSearch = !!social && !!search;
   const matching = recipes.filter((recipe) => (explore || filter === 'all' || recipe.favorite)
     && (!search || `${recipe.title}\n${recipe.ingredients}`.toLowerCase().includes(search))
     && (!explore || (matchesDiet(recipe, strict)
@@ -74,20 +79,20 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
               <Segment label="For you" active={!following} onPress={() => social.setFeed('explore')} />
               <Segment label="Following" active={following} onPress={() => social.setFeed('following')} />
             </View>
-            <Action secondary label="Find cooks" onPress={social.find}><Glyph name="search" color={color.ink} size={16} /></Action>
           </View>}
           <View style={styles.searchRow}>
           <View testID="recipe-search" style={[styles.search, searchFocused && styles.searchFocused]}>
             <Glyph name="search" size={19} color={searchFocused ? color.ink : color.soft} />
-            <TextInput value={query} onChangeText={setQuery} autoCapitalize="none" autoCorrect={false} accessibilityLabel="Search recipes"
+            <TextInput ref={searchInput} value={query} onChangeText={setQuery} autoCapitalize="none" autoCorrect={false}
+              accessibilityLabel={social ? 'Search recipes, books, and people' : 'Search recipes'}
               onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
               selectionColor={color.secondaryInk} cursorColor={color.ink} selectionHandleColor={color.secondaryInk}
-              placeholder="Search recipes" placeholderTextColor={color.soft} style={styles.searchInput} />
+              placeholder={social ? 'Recipes, books, and people' : 'Search recipes'} placeholderTextColor={color.soft} style={styles.searchInput} />
             {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}>
               <Glyph name="close" size={16} color={color.soft} />
             </Pressable>}
           </View>
-          {explore && <Pressable accessibilityRole="button" accessibilityLabel={activeFilters ? `Filters, ${activeFilters} active` : 'Filters'}
+          {explore && !globalSearch && <Pressable accessibilityRole="button" accessibilityLabel={activeFilters ? `Filters, ${activeFilters} active` : 'Filters'}
             accessibilityState={{ expanded: showFilters }} aria-expanded={showFilters} onPress={() => setShowFilters(!showFilters)}
             style={[styles.filterToggle, (showFilters || activeFilters > 0) && styles.chipSelected]}>
             <Glyph name="preferences" size={20} color={showFilters || activeFilters ? color.white : color.ink} />
@@ -99,6 +104,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
             <Segment label="Favorites" active={filter === 'favorites'} onPress={() => setFilter('favorites')} />
           </View>}
         </View>
+        {globalSearch ? <ExploreResults key={search} query={search} openRecipe={social.openRecipe} openBook={social.openBook} openCook={social.openCook} /> : <>
         {explore && showFilters && <Scene style={styles.filterPanel}>
           <View style={styles.filterHeading}>
             <Copy accessibilityRole="header" style={styles.filterTitle}>Find your kind of recipe</Copy>
@@ -170,7 +176,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           {following && !visible.length && !filtered && !social.loading && !social.failed && <View style={styles.empty}>
             <Copy accessibilityRole="header" style={styles.listTitle}>Your feed starts here</Copy>
             <Copy style={styles.emptyCopy}>Find a cook to follow and their published recipes will appear here.</Copy>
-            <Action label="Find cooks" onPress={social.find} />
+            <Action label="Search for people" onPress={() => searchInput.current?.focus()} />
           </View>}
           {!visible.length && (!following || (filtered && !social.loading && !social.failed)) && <View style={styles.empty}>
             <View style={styles.emptyIcon}><Glyph name={filter === 'favorites' && !search ? 'heart' : 'book'} size={28} color={color.ink} /></View>
@@ -181,6 +187,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           </View>}
         </Scene>
         {!!visible.length && <View style={styles.endnote}><View style={styles.endLine} /><Glyph name="ingredients" color={color.soft} size={15} /><View style={styles.endLine} /></View>}
+        </>}
       </View>
     </ScrollView>
   </Scene>;

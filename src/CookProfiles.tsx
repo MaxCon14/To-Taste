@@ -5,43 +5,16 @@ import { Glyph } from './Glyph';
 import { MotionPressable } from './motion';
 import { readCommunity, type Account } from './cookbookApi';
 import type { Recipe } from './recipes';
-import { readCook, readFollow, saveCook, searchCooks, setFollow, type Cook, type CookLookup } from './socialApi';
+import { readCook, readCookBooks, readFollow, saveCook, setFollow, type Cook, type CookLookup, type RecipeBook } from './socialApi';
 import { Action, color, Copy, Cover, font } from './ui';
+import { CollectionRow } from './RecipeBooks';
 
-export function FindCooks({ close, open }: { close: () => void; open: (cook: CookLookup) => void }) {
-  const [query, setQuery] = useState('');
-  const [cooks, setCooks] = useState<Cook[]>();
-  const [failed, setFailed] = useState(false);
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let active = true;
-    setFailed(false);
-    setCooks(undefined);
-    const timer = setTimeout(() => {
-      void searchCooks(query).then(data => { if (active) setCooks(data); })
-        .catch(() => { if (active) setFailed(true); });
-    }, 250);
-    return () => { active = false; clearTimeout(timer); };
-  }, [query, retry]);
-  return <Sheet title="Find cooks" close={close}>
-    <TextInput accessibilityLabel="Name or handle" placeholder="Search by name or @handle" autoCapitalize="none"
-      autoCorrect={false} value={query} onChangeText={setQuery} style={styles.input} />
-    {failed ? <Action secondary label="Retry search" onPress={() => setRetry(retry + 1)} /> : !cooks
-      ? <Copy accessibilityLiveRegion="polite" style={styles.secondary}>Searching…</Copy>
-      : !cooks.length ? <Copy style={styles.secondary}>{query.trim() ? 'No cooks match that search.' : 'Public profiles will appear here.'}</Copy>
-        : cooks.map(cook => <MotionPressable key={cook.user_id} accessibilityRole="button" onPress={() => open({ id: cook.user_id })} style={styles.row}>
-          <Avatar name={cook.name} />
-          <View style={styles.text}><Copy style={styles.name}>{cook.name}</Copy><Copy style={styles.secondary}>@{cook.handle}</Copy></View>
-          <Glyph name="forward" color={color.secondaryInk} size={17} />
-        </MotionPressable>)}
-  </Sheet>;
-}
-
-export function CookProfile({ lookup, account, close, edit, openRecipe, followChanged }: {
+export function CookProfile({ lookup, account, close, edit, openRecipe, followChanged, openBook, createBook }: {
   lookup: CookLookup; account: Account; close: () => void; edit: () => void;
   openRecipe: (recipe: Recipe) => void; followChanged: () => void;
+  openBook: (book: RecipeBook) => void; createBook: () => void;
 }) {
-  const [data, setData] = useState<{ cook: Cook | null; posts: Recipe[]; following: boolean }>();
+  const [data, setData] = useState<{ cook: Cook | null; posts: Recipe[]; following: boolean; books: RecipeBook[] }>();
   const { busy, error, run } = useSubmission();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
@@ -51,8 +24,8 @@ export function CookProfile({ lookup, account, close, edit, openRecipe, followCh
     setFailed(false);
     void readCook(lookup).then(async cook => {
       const id = cook?.user_id ?? ('id' in lookup ? lookup.id : undefined);
-      const [posts, following] = await Promise.all([id ? readCommunity(id) : [], cook ? readFollow(cook.user_id) : false]);
-      if (active) setData({ cook, posts, following });
+      const [posts, following, books] = await Promise.all([id ? readCommunity(id) : [], cook ? readFollow(cook.user_id) : false, cook ? readCookBooks(cook.user_id) : []]);
+      if (active) setData({ cook, posts, following, books });
     }).catch(() => { if (active) setFailed(true); });
     return () => { active = false; };
   }, [lookup, retry]);
@@ -80,6 +53,11 @@ export function CookProfile({ lookup, account, close, edit, openRecipe, followCh
         })}><Glyph name="share" color={color.ink} size={17} /></Action>}
         {link && Platform.OS === 'web' && <Copy selectable style={styles.secondary}>{link}</Copy>}
       </> : own ? <Action label="Create public profile" onPress={edit} /> : <Copy style={styles.secondary}>{'handle' in lookup ? 'That handle was not found.' : 'This cook hasn’t set up a public profile yet.'}</Copy>}
+      {(own && cook || data.books.length > 0) && <>
+        <Copy accessibilityRole="header" style={styles.heading}>Recipe books</Copy>
+        {data.books.map(book => <CollectionRow key={book.id} book={book} open={() => openBook(book)} />)}
+        {own && <Action secondary label="Create recipe book" onPress={createBook} />}
+      </>}
       <Copy accessibilityRole="header" style={styles.heading}>Published recipes</Copy>
       {!data.posts.length && <Copy style={styles.secondary}>No published recipes yet.</Copy>}
       {data.posts.map(recipe => <MotionPressable key={recipe.id} accessibilityRole="button" onPress={() => openRecipe(recipe)} style={styles.row}>
@@ -92,11 +70,14 @@ export function CookProfile({ lookup, account, close, edit, openRecipe, followCh
   </Sheet>;
 }
 
-export function EditCook({ account, close, saved }: { account: Account; close: () => void; saved: () => void }) {
+export function EditCook({ account, close, saved, duringSignup = false }: {
+  account: Account; close?: () => void; saved: (cook: Cook) => void; duringSignup?: boolean;
+}) {
   const [existing, setExisting] = useState<Cook | null>();
   const [name, setName] = useState(account.name);
   const [handle, setHandle] = useState('');
   const [bio, setBio] = useState('');
+  const [retry, setRetry] = useState(0);
   const { busy, error, run } = useSubmission();
   useEffect(() => {
     let active = true;
@@ -106,31 +87,31 @@ export function EditCook({ account, close, saved }: { account: Account; close: (
         if (!active) return;
         setExisting(cook);
         if (cook) { setName(cook.name); setHandle(cook.handle); setBio(cook.bio); }
-      } catch { throw new Error('Couldn’t open your profile. Close and try again.'); }
+      } catch { throw new Error('Couldn’t open your profile. Try again.'); }
     });
     return () => { active = false; };
-  }, [account.id]);
-  return <Sheet title="Your public profile" close={close} busy={busy}>
-    <Copy style={styles.secondary}>Your name, handle and bio will be visible to anyone who opens your profile.</Copy>
+  }, [account.id, retry]);
+  return <Sheet title={duringSignup ? 'Choose your username' : 'Your public profile'} close={close} busy={busy}>
+    <Copy style={styles.secondary}>{duringSignup ? 'People can find you by your username and display name.' : 'Your name, username and bio will be visible to anyone who opens your profile.'}</Copy>
     {existing !== undefined && <>
       <Copy style={styles.name}>Display name</Copy>
       <TextInput accessibilityLabel="Display name" value={name} onChangeText={setName} maxLength={60} editable={!busy} style={styles.input} />
-      <Copy style={styles.name}>Handle</Copy>
-      <TextInput accessibilityLabel="Handle" value={handle} onChangeText={setHandle} autoCapitalize="none" autoCorrect={false}
-        placeholder="your_handle" maxLength={25} editable={!busy} style={styles.input} />
+      <Copy style={styles.name}>Username</Copy>
+      <TextInput accessibilityLabel="Username" value={handle} onChangeText={setHandle} autoCapitalize="none" autoCorrect={false}
+        placeholder="your_username" maxLength={25} editable={!busy} style={styles.input} />
       <Copy style={styles.secondary}>3–24 characters. Use letters, numbers or underscores.</Copy>
-      <Copy style={styles.name}>Bio</Copy>
+      {!duringSignup && <><Copy style={styles.name}>Bio</Copy>
       <TextInput accessibilityLabel="Bio" value={bio} onChangeText={setBio} placeholder="What do you like to cook?"
-        multiline maxLength={280} editable={!busy} style={[styles.input, styles.bioInput]} />
-      <Action label="Save public profile" disabled={busy} onPress={() => void run(async () => {
+        multiline maxLength={280} editable={!busy} style={[styles.input, styles.bioInput]} /></>}
+      <Action label={duringSignup ? 'Continue' : 'Save public profile'} disabled={busy} onPress={() => void run(async () => {
         const cleanHandle = handle.trim().toLowerCase().replace(/^@/, '');
         if (!name.trim()) throw new Error('Enter a display name.');
         if (!/^[a-z0-9][a-z0-9_]{2,23}$/.test(cleanHandle)) throw new Error('Choose a valid handle that starts with a letter or number.');
-        await saveCook({ name: name.trim(), handle: cleanHandle, bio: bio.trim() }, !!existing, account.id);
-        saved();
+        saved(await saveCook({ name: name.trim(), handle: cleanHandle, bio: bio.trim() }, !!existing, account.id));
       })} />
     </>}
     {busy && existing === undefined && <Copy style={styles.secondary}>Opening your profile…</Copy>}
+    {!busy && existing === undefined && !!error && <Action secondary label="Retry profile" onPress={() => setRetry(value => value + 1)} />}
     {error && <Copy accessibilityRole="alert" style={styles.error}>{error}</Copy>}
   </Sheet>;
 }

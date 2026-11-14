@@ -3,7 +3,7 @@ import type { ShareOptions } from './FlowSheets';
 import { requireSupabase, supabase } from './supabase';
 import { allergens, readCookingPreferences, type Allergen, type Personalization } from './allergens';
 
-export type Account = { id: string; name: string; diet: Diet; personalization?: Personalization };
+export type Account = { id: string; name: string; diet: Diet; personalization?: Personalization; username?: string };
 export type Session = { user: Account | null; recipes: Recipe[] };
 export const accountsConfigured = Boolean(supabase);
 
@@ -29,18 +29,20 @@ export async function readSession(): Promise<Session> {
   if (sessionError) throw sessionError;
   if (!session) return { user: null, recipes: [] };
   const id = session.user.id;
-  const [profile, recipes] = await Promise.all([
+  const [profile, recipes, cook] = await Promise.all([
     supabase.from('profiles').select('display_name,diet').eq('user_id', id).maybeSingle(),
     cookbook(id),
+    supabase.from('cook_profiles').select('handle').eq('user_id', id).maybeSingle(),
   ]);
   if (profile.error) throw profile.error;
+  if (cook.error) throw cook.error;
   const raw = session.user.user_metadata?.to_taste_preferences;
   const cooking = readCookingPreferences(raw?.cooking);
   const personalization: Personalization | undefined = raw && Array.isArray(raw.allergens)
     && cooking !== null
     ? { allergens: [...new Set<Allergen>(raw.allergens.filter((item: unknown) => typeof item === 'string' && Object.hasOwn(allergens, item)))], cooking }
     : undefined;
-  return { user: { id, name: profile.data?.display_name ?? '', diet: profile.data?.diet ?? 'any', personalization }, recipes };
+  return { user: { id, name: profile.data?.display_name ?? '', diet: profile.data?.diet ?? 'any', personalization, username: cook.data?.handle }, recipes };
 }
 
 export async function savePersonalization(preferences: Personalization) {
@@ -68,6 +70,19 @@ export async function readFollowingRecipes(): Promise<Recipe[]> {
   const { data, error } = await requireSupabase().rpc('followed_recipes');
   if (error) throw error;
   return publishedRecipes(data as Publication[]);
+}
+
+export async function searchRecipePosts(term: string) {
+  const { data, error } = await requireSupabase().rpc('search_recipe_posts', { term });
+  if (error) throw error;
+  return publishedRecipes(data as Publication[]);
+}
+
+export async function readBookRecipes(ids: string[]) {
+  const { data, error } = await requireSupabase().from('community_recipes').select('id,user_id,recipe,options').in('id', ids);
+  if (error) throw error;
+  const posts = new Map(publishedRecipes(data as Publication[]).map(recipe => [recipe.id, recipe]));
+  return ids.flatMap(id => posts.get(`community:${id}`) ?? []);
 }
 
 function publishedRecipes(rows: Publication[]): Recipe[] {

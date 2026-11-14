@@ -9,8 +9,9 @@ import { GlassNav, type Tab } from './GlassNav';
 import { MotionProvider, Scene, WebPolish } from './motion';
 import { Library, type Filter } from './Library';
 import { Onboarding } from './Onboarding';
-import { CookProfile, EditCook, FindCooks } from './CookProfiles';
-import type { CookLookup } from './socialApi';
+import { CookProfile, EditCook } from './CookProfiles';
+import { BookSheet, CreateBook } from './RecipeBooks';
+import type { Cook, CookLookup, RecipeBook } from './socialApi';
 import type { Personalization } from './allergens';
 import { RecipeForm, type FormState } from './RecipeForm';
 import { RecipeScreen } from './RecipeScreen';
@@ -95,9 +96,10 @@ function Cookbook() {
   const [followingFailed, setFollowingFailed] = useState(false);
   const [followRevision, setFollowRevision] = useState(0);
   const [feed, setFeed] = useState<'explore' | 'following'>('explore');
-  const [findCooks, setFindCooks] = useState(false);
   const [cook, setCook] = useState<CookLookup>();
   const [editCook, setEditCook] = useState(false);
+  const [book, setBook] = useState<RecipeBook>();
+  const [creatingBook, setCreatingBook] = useState(false);
   const [openedPost, setOpenedPost] = useState<Recipe>();
   const [profileLink, setProfileLink] = useState(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
@@ -222,7 +224,7 @@ function Cookbook() {
   }, [account?.id, onboarding, tab, feed, followRevision]);
 
   useEffect(() => {
-    if (!ready || !account || onboarding || !profileLink || openedProfileLink.current) return;
+    if (!ready || !account?.username || onboarding || !profileLink || openedProfileLink.current) return;
     openedProfileLink.current = true;
     setCook({ handle: profileLink });
     const url = new URL(window.location.href);
@@ -457,9 +459,10 @@ function Cookbook() {
     setFollowing(undefined);
     setFollowingFailed(false);
     setFeed('explore');
-    setFindCooks(false);
     setCook(undefined);
     setEditCook(false);
+    setBook(undefined);
+    setCreatingBook(false);
     setOpenedPost(undefined);
     setOnboarding(true);
     setRecipes([]);
@@ -523,6 +526,18 @@ function Cookbook() {
     </> : <ActivityIndicator color={color.secondaryInk} />}
   </View>;
 
+  function applyCookProfile(profile: Cook) {
+    const owner = accountRef.current;
+    if (owner?.id !== profile.user_id) return;
+    const updated = { ...owner, username: profile.handle };
+    accountRef.current = updated;
+    setAccount(updated);
+  }
+
+  if (account && !account.username) return <View style={styles.safe}>
+    <EditCook key={account.id} account={account} duringSignup saved={applyCookProfile} />
+  </View>;
+
   const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError} />;
   if (onboarding || !account) return <>
     <Onboarding key={account?.id ?? 'signup'} accountId={account?.id} initialDiet={preference} initial={account?.personalization} recipes={discoveries}
@@ -548,6 +563,12 @@ function Cookbook() {
     setAddMenu(false);
     setForm(state);
   }
+  function openSocialRecipe(recipe: Recipe) {
+    setBook(undefined);
+    setCook(undefined);
+    setOpenedPost(recipe);
+    setSelected(recipe.id);
+  }
   return <>
     <SafeAreaView edges={['top']} style={[styles.safe, activeRecipe && styles.covered]}
       accessibilityElementsHidden={Boolean(activeRecipe)} importantForAccessibility={activeRecipe ? 'no-hide-descendants' : 'auto'}
@@ -556,7 +577,8 @@ function Cookbook() {
       <View style={[styles.safe, tab !== 'explore' && styles.inactiveTab]} pointerEvents={tab === 'explore' ? 'auto' : 'none'}
         aria-hidden={tab !== 'explore'} importantForAccessibility={tab === 'explore' ? 'auto' : 'no-hide-descendants'}>
         <Library active={tab === 'explore'} explore recipes={exploreRecipes} filter="all" setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
-          social={{ feed, setFeed, find: () => setFindCooks(true), loading: feed === 'following' && following === undefined && !followingFailed,
+          social={{ feed, setFeed, openRecipe: openSocialRecipe, openBook: setBook, openCook: person => setCook({ id: person.user_id }),
+            loading: feed === 'following' && following === undefined && !followingFailed,
             failed: feed === 'following' && followingFailed, retry: () => setFollowRevision(value => value + 1) }}
           personalization={account.personalization}
           preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)}
@@ -595,13 +617,18 @@ function Cookbook() {
         setShare(activeRecipe.id);
         if (!account) setAuth(true);
       } : undefined} />}
-    {findCooks && <FindCooks close={() => setFindCooks(false)} open={lookup => { setFindCooks(false); setCook(lookup); }} />}
-    {cook && !editCook && <CookProfile lookup={cook} account={account} close={() => setCook(undefined)} edit={() => setEditCook(true)}
-      openRecipe={recipe => { setOpenedPost(recipe); setSelected(recipe.id); setCook(undefined); }}
+    {cook && !editCook && !book && !creatingBook && <CookProfile lookup={cook} account={account} close={() => setCook(undefined)} edit={() => setEditCook(true)}
+      openRecipe={openSocialRecipe} openBook={setBook} createBook={() => setCreatingBook(true)}
       followChanged={() => setFollowRevision(value => value + 1)} />}
-    {editCook && <EditCook account={account} close={() => setEditCook(false)} saved={() => {
+    {editCook && <EditCook account={account} close={() => setEditCook(false)} saved={profile => {
+      applyCookProfile(profile);
       setEditCook(false);
       setCook({ id: account.id });
+    }} />}
+    {book && <BookSheet book={book} close={() => setBook(undefined)} openRecipe={openSocialRecipe} />}
+    {creatingBook && <CreateBook userId={account.id} close={() => setCreatingBook(false)} saved={() => {
+      setCreatingBook(false);
+      setNotice({ text: 'Recipe book published' });
     }} />}
     {notice && <View style={[styles.notice, notice.error && styles.noticeError]}>
       <Copy accessibilityRole={notice.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={styles.noticeText}>{notice.text}</Copy>
