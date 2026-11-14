@@ -22,6 +22,7 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
   const [draft, setDraft] = useState(state.draft ?? emptyDraft);
   const [url, setUrl] = useState(state.url ?? '');
   const [caption, setCaption] = useState('');
+  const [reviewNotes, setReviewNotes] = useState<string[]>([]);
   const [canWrite, setCanWrite] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -35,6 +36,8 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
   const preview = lines(draft.ingredients);
   const socialLink = isSocialRecipeLink(url);
   const socialDraft = !!draft.source && isSocialRecipeLink(draft.source);
+  const localVideoImport = Platform.OS === 'web' && typeof window !== 'undefined'
+    && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   const title = confirmDelete ? 'Delete this recipe?' : mode === 'import' ? 'Import a recipe' : state.id ? 'Edit recipe' : draft.source ? 'Review recipe' : 'Add a recipe';
 
   function update(key: keyof RecipeDraft, value: string) {
@@ -89,10 +92,39 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
         throw error;
       }
       if (!alive.current) return;
+      setReviewNotes([]);
       setDraft(imported);
       setMode('manual');
       onDraft?.({ mode: 'manual', draft: imported });
     });
+  }
+
+  function chooseVideo() {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'video/mp4,video/quicktime,video/webm';
+    picker.onchange = () => {
+      const video = picker.files?.[0];
+      if (!video || !alive.current) return;
+      void run(async () => {
+        const source = normalizeRecipeUrl(url);
+        if (video.size > 20 * 1024 * 1024 || !video.size) throw new Error('Choose a video under 20 MB.');
+        const response = await fetch('/api/import-video', {
+          method: 'POST', body: video, headers: { 'Content-Type': video.type },
+          signal: AbortSignal.timeout(100_000),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? 'Video analysis couldn’t finish.');
+        if (!alive.current) return;
+        const next = { ...emptyDraft, title: result.title, source,
+          ingredients: result.ingredients.join('\n'), instructions: result.instructions.join('\n') };
+        setReviewNotes(result.reviewNotes);
+        setDraft(next);
+        setMode('manual');
+        onDraft?.({ mode: 'manual', draft: next });
+      });
+    };
+    picker.click();
   }
 
   function switchMode(next: Mode) {
@@ -135,12 +167,20 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
                 onDraft?.({ mode: 'import', url: value, draft });
               }} placeholder="https://…" autoCapitalize="none" autoCorrect={false}
                 keyboardType="url" inputMode="url" onSubmitEditing={fetchRecipe} editable={!busy} />
-              {socialLink && <Field label="Caption or transcript" hint="If the link can’t be read, paste the recipe text with Ingredients and Directions headings."
+              {socialLink && canWrite && localVideoImport && <>
+                <Copy style={styles.helper}>You can upload a clip you have permission to share. It will be sent to Gemini for analysis.</Copy>
+                <Action secondary label="Upload video" onPress={chooseVideo} disabled={busy} />
+              </>}
+              {socialLink && (canWrite || caption) && <Field label="Caption or transcript" hint="Paste the recipe text with Ingredients and Directions headings."
                 value={caption} onChangeText={setCaption} placeholder="Paste the creator’s recipe text (optional)" multiline editable={!busy} />}
               {canWrite && <Action secondary label="Write it and keep the link" onPress={writeFromLink} />}
             </> : <>
               {!!draft.source && <Copy style={styles.helper}>Original link attached</Copy>}
               {socialDraft && <Copy style={styles.helper}>Compare this draft with the original video. Fill in any missing amounts, times, or steps before saving.</Copy>}
+              {reviewNotes.length > 0 && <View style={styles.preview}>
+                <Copy accessibilityRole="header" style={styles.label}>Check against the video</Copy>
+                {reviewNotes.map((note, index) => <Copy key={index} style={styles.helper}>{note}</Copy>)}
+              </View>}
               {!!draft.photo && <View style={styles.photo}><Cover recipe={draft} /></View>}
               <Field label="Recipe name" value={draft.title} onChangeText={(value) => update('title', value)} placeholder="e.g. Sunday onion soup" />
               <View style={styles.row}>

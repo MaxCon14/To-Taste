@@ -7,6 +7,7 @@ import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ipaddr from 'ipaddr.js';
 import { handlePinchApi } from './server/pinch.mjs';
+import { importVideoRecipe } from './server/recipe-video.mjs';
 
 const root = fileURLToPath(new URL('./dist', import.meta.url));
 const port = Number(process.env.PINCH_PORT ?? 4173);
@@ -70,6 +71,10 @@ if (!existsSync(resolve(root, 'index.html'))) console.log('Build the web bundle 
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname === '/api/import-video' && req.method === 'POST') {
+      await importVideoRecipe(req, res);
+      return;
+    }
     if (url.pathname.startsWith('/api/pinch/')) {
       await handlePinchApi(req, res, url.pathname);
       return;
