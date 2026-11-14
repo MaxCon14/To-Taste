@@ -47,7 +47,8 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
   useEffect(() => {
     if (draftKey && restored) void AsyncStorage.setItem(draftKey, JSON.stringify({ step, selected, diet, cooking })).catch(() => {});
   }, [draftKey, restored, step, selected, diet, cooking]);
-  const visibleStep = accountId ? Math.max(3, step) : Math.min(2, step);
+  const visibleStep = accountId ? Math.max(3, step) : 1;
+  const progress = visibleStep === 1 ? 1 : visibleStep - 1;
   const recommendations = recipes.map(recipe => ({ recipe, warnings: allergenWarnings(recipe.ingredients, selected ?? []) }))
     .sort((a, b) => Number(!!a.warnings.length) - Number(!!b.warnings.length)
       || Number(b.recipe.discovery?.diet === diet) - Number(a.recipe.discovery?.diet === diet)
@@ -58,21 +59,15 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
       <View style={styles.header}>
         <Image source={require('../assets/icon.png')} style={styles.mark} />
         <Copy style={styles.brand}>To Taste</Copy>
-        <Copy style={styles.progressLabel}>{visibleStep} / 5</Copy>
+        <Copy style={styles.progressLabel}>{progress} / 4</Copy>
       </View>
-      <View style={styles.track}><View style={[styles.fill, { width: `${visibleStep * 20}%` }]} /></View>
+      <View style={styles.track}><View style={[styles.fill, { width: `${progress * 25}%` }]} /></View>
       <Scene key={visibleStep} style={styles.content}>
         {visibleStep === 1 && <>
           <View style={styles.art}><OnboardingArtwork scene="cookbook" size={290} /></View>
           <Copy accessibilityRole="header" style={styles.title}>All your recipes. Ready to cook.</Copy>
           <Copy style={styles.description}>Save the recipes you love and discover meals that suit the way you eat.</Copy>
-          <Action label="Get started" onPress={() => setStep(2)} />
-          {signIn && <Action secondary label="Sign in" onPress={signIn} />}
-        </>}
-        {visibleStep === 2 && <>
-          <Copy accessibilityRole="header" style={styles.title}>Make it yours.</Copy>
-          <Copy style={styles.description}>Create an account to save your cookbook and carry your preferences across devices.</Copy>
-          {signIn ? <Action label="Create account or sign in" onPress={signIn} /> : <Copy>Accounts are unavailable in this build.</Copy>}
+          {signIn ? <Action label="Get started" onPress={signIn} /> : <Copy>Accounts are unavailable in this build.</Copy>}
         </>}
         {visibleStep === 3 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you need to avoid?</Copy>
@@ -105,7 +100,7 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         </>}
         {error ? <Copy accessibilityRole="alert" style={styles.warning}>{error}</Copy> : null}
         {!restored && <Copy accessibilityLiveRegion="polite">Opening your preferences…</Copy>}
-        {(visibleStep === 2 || visibleStep > 3) && <Action secondary label="Back" disabled={busy} onPress={() => setStep(visibleStep - 1)} />}
+        {visibleStep > 3 && <Action secondary label="Back" disabled={busy} onPress={() => setStep(visibleStep - 1)} />}
         {cancel && <Action secondary label="Cancel edits" disabled={busy} onPress={cancel} />}
       </Scene>
     </ScrollView>
