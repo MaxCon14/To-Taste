@@ -1,7 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ingredientAmount, parseIngredient } from '../src/ingredients.ts';
-import { normalizeRecipeUrl, recipeFromHtml } from '../src/importRecipe.ts';
+import { isSocialRecipeLink, normalizeRecipeUrl, recipeFromCaption, recipeFromHtml } from '../src/importRecipe.ts';
+
+test('imports only quantities and steps actually written in a recipe caption', () => {
+  const source = 'https://www.instagram.com/reel/example/';
+  const draft = recipeFromCaption('Tomato pasta\n\nIngredients:\n- 2 tomatoes\n- Olive oil\n\nDirections:\n1. Roast the tomatoes.\n2. Toss with pasta.\n#dinner', source);
+  assert.equal(draft?.ingredients, '2 tomatoes\nOlive oil');
+  assert.equal(draft?.instructions, 'Roast the tomatoes.\nToss with pasta.');
+  assert.equal(draft?.minutes, '');
+  assert.equal(draft?.source, source);
+  assert.equal(recipeFromCaption('Quick pasta! #dinner', source), undefined);
+});
+
+test('recognizes social video hosts without matching lookalike domains', () => {
+  assert.equal(isSocialRecipeLink('https://vm.tiktok.com/example/'), true);
+  assert.equal(isSocialRecipeLink('https://youtu.be/example'), true);
+  assert.equal(isSocialRecipeLink('https://instagram.com.example.org/reel/example/'), false);
+});
 
 test('turns a typed onion count into a multiplier and icon', () => {
   const onion = parseIngredient('2 Onions');

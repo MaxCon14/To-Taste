@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { importRecipe, normalizeRecipeUrl } from './importRecipe';
+import { importRecipe, isSocialRecipeLink, normalizeRecipeUrl, recipeFromCaption } from './importRecipe';
 import { emptyDraft, lines, type RecipeDraft } from './recipes';
 import { MotionPressable as Pressable, useSceneMotion, useReducedMotion } from './motion';
 import { Glyph } from './Glyph';
@@ -21,6 +21,7 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
   const [mode, setMode] = useState<Mode>(state.mode);
   const [draft, setDraft] = useState(state.draft ?? emptyDraft);
   const [url, setUrl] = useState(state.url ?? '');
+  const [caption, setCaption] = useState('');
   const [canWrite, setCanWrite] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,6 +33,8 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
     return () => { alive.current = false; };
   }, []);
   const preview = lines(draft.ingredients);
+  const socialLink = isSocialRecipeLink(url);
+  const socialDraft = !!draft.source && isSocialRecipeLink(draft.source);
   const title = confirmDelete ? 'Delete this recipe?' : mode === 'import' ? 'Import a recipe' : state.id ? 'Edit recipe' : draft.source ? 'Review recipe' : 'Add a recipe';
 
   function update(key: keyof RecipeDraft, value: string) {
@@ -72,7 +75,15 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
       setCanWrite(false);
       const source = normalizeRecipeUrl(url);
       let imported: RecipeDraft;
-      try { imported = await importRecipe(source, Platform.OS === 'web'); }
+      try {
+        if (socialLink && caption.trim()) {
+          const fromCaption = recipeFromCaption(caption, source);
+          if (!fromCaption) throw new Error('Add an Ingredients or Directions heading on its own line, or write the recipe and keep the link.');
+          imported = fromCaption;
+        } else {
+          imported = await importRecipe(source, Platform.OS === 'web');
+        }
+      }
       catch (error) {
         if (alive.current) setCanWrite(true);
         throw error;
@@ -115,17 +126,21 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
               <Segment active={mode === 'import'} label="Import link" onPress={() => switchMode('import')} />
             </View>}
             {mode === 'import' ? <>
-              <Copy style={styles.helper}>Paste a recipe link to bring in the ingredients and directions.</Copy>
+              <Copy style={styles.helper}>Paste a recipe website or a link to a cooking video.</Copy>
               <Field label="Recipe link" value={url} onChangeText={(value) => {
                 setUrl(value);
+                setCaption('');
                 setError('');
                 setCanWrite(false);
                 onDraft?.({ mode: 'import', url: value, draft });
               }} placeholder="https://…" autoCapitalize="none" autoCorrect={false}
                 keyboardType="url" inputMode="url" onSubmitEditing={fetchRecipe} editable={!busy} />
+              {socialLink && <Field label="Caption or transcript" hint="If the link can’t be read, paste the recipe text with Ingredients and Directions headings."
+                value={caption} onChangeText={setCaption} placeholder="Paste the creator’s recipe text (optional)" multiline editable={!busy} />}
               {canWrite && <Action secondary label="Write it and keep the link" onPress={writeFromLink} />}
             </> : <>
               {!!draft.source && <Copy style={styles.helper}>Original link attached</Copy>}
+              {socialDraft && <Copy style={styles.helper}>Compare this draft with the original video. Fill in any missing amounts, times, or steps before saving.</Copy>}
               {!!draft.photo && <View style={styles.photo}><Cover recipe={draft} /></View>}
               <Field label="Recipe name" value={draft.title} onChangeText={(value) => update('title', value)} placeholder="e.g. Sunday onion soup" />
               <View style={styles.row}>

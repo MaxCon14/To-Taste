@@ -89,6 +89,52 @@ export function normalizeRecipeUrl(input: string): string {
   }
 }
 
+export function isSocialRecipeLink(input: string): boolean {
+  try {
+    const host = new URL(normalizeRecipeUrl(input)).hostname;
+    return /(?:^|\.)(?:tiktok\.com|instagram\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|pinterest\.com|pin\.it|threads\.net|threads\.com|x\.com|twitter\.com|snapchat\.com|vimeo\.com)$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+export function recipeFromCaption(caption: string, source: string): RecipeDraft | undefined {
+  let section: 'ingredients' | 'instructions' | undefined;
+  let title = '';
+  const ingredients: string[] = [];
+  const instructions: string[] = [];
+  for (const raw of caption.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const heading = line.match(/^(?:[^\p{L}\p{N}]*)?(ingredients|what you(?:’|')ll need|directions|instructions|steps|method|how to make it)\s*[:：]?\s*$/iu);
+    if (heading) {
+      section = /ingredients|need/i.test(heading[1]) ? 'ingredients' : 'instructions';
+      continue;
+    }
+    if (/^(?:#|@|follow\b|save (?:this|for)\b|(?:notes|tips|nutrition|servings|credits)\s*[:：]?$)/i.test(line)) {
+      section = undefined;
+      continue;
+    }
+    if (section === 'ingredients') ingredients.push(line.replace(/^[-•*]\s+/, ''));
+    else if (section === 'instructions') instructions.push(line.replace(/^(?:[-•*]|\d+[.)])\s+/, ''));
+    else if (!title && !ingredients.length && !instructions.length) title = line.slice(0, 120);
+  }
+  if (!ingredients.length && !instructions.length) return;
+  return { ...emptyDraft, title, ingredients: ingredients.join('\n'), instructions: instructions.join('\n'), source };
+}
+
+function socialCaptionFromHtml(html: string): string {
+  const metadata = new Map<string, string>();
+  for (const [tag] of html.matchAll(/<meta\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi)) {
+    const attrs = Object.fromEntries([...tag.matchAll(/\b([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
+      .map(([, key, double, single]) => [key.toLowerCase(), double ?? single]));
+    const property = attrs.property ?? attrs.name;
+    if (property && attrs.content) metadata.set(property, attrs.content);
+  }
+  const caption = metadata.get('og:description') ?? metadata.get('twitter:description') ?? metadata.get('description') ?? '';
+  return entities.decode(caption);
+}
+
 export async function importRecipe(input: string, web: boolean): Promise<RecipeDraft> {
   const url = normalizeRecipeUrl(input);
   const controller = new AbortController();
@@ -101,12 +147,15 @@ export async function importRecipe(input: string, web: boolean): Promise<RecipeD
     if (!response.ok) throw new Error();
     const page = web ? await response.json() as { html: string; url: string }
       : { html: await response.text(), url: response.url || url };
-    const recipe = recipeFromHtml(page.html, page.url);
+    const recipe = recipeFromHtml(page.html, page.url)
+      ?? (isSocialRecipeLink(url) ? recipeFromCaption(socialCaptionFromHtml(page.html), url) : undefined);
     if (recipe) return recipe;
   } catch {
+    if (isSocialRecipeLink(url)) throw new Error('To Taste couldn’t read the caption from this link. Paste the caption or transcript to continue.');
     throw new Error('To Taste couldn’t read that page. Check the link or enter the recipe by hand.');
   } finally {
     clearTimeout(timeout);
   }
+  if (isSocialRecipeLink(url)) throw new Error('The caption didn’t contain a readable ingredient list or directions. Paste the recipe text or write it and keep the link.');
   throw new Error('To Taste couldn’t find recipe ingredients on that page. Try another link or enter the recipe by hand.');
 }
