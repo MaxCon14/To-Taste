@@ -5,3 +5,7 @@ web-build/
 *.log
 .pinch/
 .env.local
+.env
+.env.*.local
+supabase/.temp/
+supabase/functions/.env

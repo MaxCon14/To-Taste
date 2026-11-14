@@ -10,10 +10,10 @@ export type Filter = 'all' | 'favorites';
 type Props = {
   recipes: Recipe[]; filter: Filter; setFilter: (filter: Filter) => void;
   onOpen: (id: string) => void; onFavorite: (id: string) => void; onAdd: () => void;
-  explore?: boolean; preference: Diet; onDiet: () => void; active: boolean;
+  explore?: boolean; preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
 };
 
-export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, active }: Props) {
+export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const wide = width >= 850;
   const [query, setQuery] = useState('');
@@ -109,6 +109,14 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           <Copy style={styles.filterSummaryText}>{[collection !== 'All' ? collection : '', strict !== 'any' ? dietOptions[strict] : ''].filter(Boolean).join(' · ')}</Copy>
           <Pressable accessibilityRole="button" accessibilityLabel="Reset filters" onPress={() => { setCollection('All'); setStrict('any'); }} style={styles.resetFilters}><Copy style={styles.resetLabel}>Reset</Copy></Pressable>
         </View>}
+        {explore && onDismissDiet && !filtered && <View style={styles.personalize}>
+          <Copy accessibilityRole="header" style={styles.filterTitle}>What do you like to cook?</Copy>
+          <Copy style={styles.subtitle}>Choose a diet preference to get recipe suggestions.</Copy>
+          <View style={styles.personalizeActions}>
+            <Action secondary label="Choose preference" onPress={onDiet} />
+            <Action secondary label="Skip" onPress={onDismissDiet} />
+          </View>
+        </View>}
         <Scene trigger={`${search}|${collection}|${strict}|${filter}`}>
           {featured && <View testID="recipe-card" style={[styles.feature, wide && styles.featureWide]}>
             <Pressable accessibilityRole="button" accessibilityLabel={`View ${featured.title}`} onPress={() => onOpen(featured.id)} style={styles.featureButton}>
@@ -189,6 +197,8 @@ const styles = StyleSheet.create({
   edition: { fontFamily: font.medium, fontSize: 10, letterSpacing: 1.5, color: color.soft, paddingBottom: 5 },
   caption: { color: color.soft, fontSize: 12, lineHeight: 20 },
   toolbar: { gap: 16, marginBottom: 24 },
+  personalize: { borderWidth: 1, borderColor: color.rule, borderRadius: 24, padding: 18, gap: 8, marginBottom: 24 },
+  personalizeActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   search: { flex: 1, minWidth: 0, minHeight: 50, borderRadius: 16, borderWidth: 2, borderColor: 'transparent', backgroundColor: color.muted, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 14 },
   searchFocused: { borderColor: color.soft },

@@ -14,7 +14,7 @@ Design references: [Apple Liquid Glass](https://developer.apple.com/documentatio
 
 ## Try it on iPhone
 
-Install the App Store version of Expo Go, which supports this project's Expo SDK 54. Sign into the same Expo account on your computer and in Expo Go. Run these commands in the project folder, then scan the QR code with the iPhone camera while both devices are on the same Wi-Fi network.
+For a guest preview, use Expo Go compatible with SDK 54. Use a development build to test native Apple and Google sign-in and the To Taste callback scheme. Sign into the same Expo account on your computer and in Expo Go. Run these commands in the project folder, then scan the QR code with the iPhone camera while both devices are on the same Wi-Fi network.
 
 ```sh
 npm install
@@ -24,7 +24,7 @@ npm start -- --go
 
 [Expo Go version compatibility](https://docs.expo.dev/troubleshooting/expo-go-version-mismatch/) · [Running on a physical device](https://docs.expo.dev/get-started/start-developing/)
 
-For accounts and community sharing on iPhone, set `EXPO_PUBLIC_PINCH_API_URL` to the HTTPS origin of your To Taste server before starting Expo. Local recipes, dietary preferences, and the starter Explore collection work without a connection to that server. The browser preview uses the same origin automatically.
+Set the Expo public values from `.env.example` in your development build environment to enable Supabase. Guest mode, local drafts, and the shopping list work without these values.
 
 ## Preview in a browser
 
@@ -34,26 +34,35 @@ npm run build:web
 npm run preview
 ```
 
-Open [To Taste at localhost:4173](http://localhost:4173). Use Node.js 24. The preview server handles browser link imports and stores accounts, synced recipes, and community posts in a local SQLite database under `.pinch/`. The iPhone app fetches source recipe pages directly. The server defaults to loopback, and a hosted instance should use HTTPS with `PINCH_SECURE_COOKIES=1`.
+Open [To Taste at localhost:4173](http://localhost:4173) using Node.js 24. The preview server handles web recipe link imports. The app connects to Supabase directly for authentication and cloud data when configured.
 
 ## Using the MVP
 
-- **Welcome** opens with a short animated recipe-card introduction and an ingredient-to-emoji demonstration. Skip the intro anytime, create an account, sign in, or continue as a guest. Choose or skip a dietary preference, then enter Explore through a personal welcome. New registrations resume at preferences after a refresh if setup was unfinished. Profile → Replay welcome lets you revisit the flow without deleting recipes or signing out. Animations settle after their entrance and respect Reduce Motion; layouts adapt to compact phones and desktop screens.
+- **Welcome** opens Explore in guest mode or offers a single screen to sign in or create an account. Explore includes an optional dietary preference card.
 - **Explore** is available to guests. Pick an optional dietary preference to order recipes or apply a diet filter to limit results.
 - **Add** offers link import, manual entry, and draft recovery. Enter one ingredient and one direction per line. If a supported public link cannot be read, you can write the recipe and keep its source attached.
-- **Saved** contains your private recipe book and Favorites. Creating an account or signing in brings your guest recipe book into the account. Drafts are stored locally for each account or guest.
+- **Saved** contains your private recipe book and Favorites. After signing in, you can choose to copy guest recipes to your account or keep them on this device. Drafts are stored locally for each account or guest.
 - **Start cooking** opens the directions one step at a time with ingredient lookup and suggested timers. Timer state is scoped to the open recipe. The app keeps the screen awake in cooking mode where supported.
-- **Share with the community** opens a public preview from a recipe you created. Publishing makes a snapshot available in Explore on the same server. Deleting the original from your recipe book also removes its community post.
+- **Share with the community** opens a public preview from a recipe you created. Publishing makes a snapshot available in Explore for other users. Deleting the original from your recipe book also removes its community post.
 
 Run `npm test` for ingredient parsing and import checks, and `npm run typecheck` for TypeScript.
 
-## Account setup
+## Supabase account setup
 
-The browser preview includes a local Node and SQLite account backend. Open the preview in a private browser window to see the first-run flow. You can register a test account, sign out, and sign in again without creating a cloud project. This local backend supports password sign-in and account sessions. Email verification and password reset are future integrations.
+Copy `.env.example` to `.env.local` and rebuild. The example targets the To Taste project using its publishable key. Keep server credentials in Supabase or your build provider, outside frontend variables and Git.
 
-For account testing on iPhone, deploy the To Taste backend to a reachable HTTPS address and set `EXPO_PUBLIC_PINCH_API_URL` to that origin in the Expo build or development environment. If using the SQLite backend, use persistent storage for the database and enable secure cookies in the hosted web deployment.
+The migration in `supabase/migrations` creates private profiles and cookbooks and a publicly readable collection of explicitly published recipes. Apply it once per project. The `delete-account` Edge Function validates the signed-in user and deletes only that user. Database foreign keys remove their cloud cookbook, profile, and publications. Existing guest data uses the original device storage keys. Legacy SQLite accounts and their cloud recipes require a separate migration.
 
-For a Supabase rollout, create separate test and production projects as needed. Share the test project URL and publishable key, and grant project access if configuration or migrations should be performed on your behalf. Keep privileged keys in the backend environment. The existing To Taste API will need to be connected to Supabase Auth and data storage, with email confirmation and reset links tested on web and iPhone. If local test accounts or recipes must carry over, decide that before switching backends.
+Configure the following in the [To Taste Supabase dashboard](https://supabase.com/dashboard/project/ccbzwxgwefpmcfjoytmv):
+
+1. Under Authentication → URL Configuration, set the Site URL to your deployed web origin and allow its exact root URL, `http://localhost:4173/` for local testing, and `totaste://auth/callback` for the development build.
+2. Under Authentication → Email Templates, set the **Magic Link** template to include the six-digit code using `{{ .Token }}`. Use the same code in **Confirm signup**. Example body: `<h1>Sign in to To Taste</h1><p>Your sign-in code is <strong>{{ .Token }}</strong>.</p><p>If you didn’t request a code, ignore this email.</p>`. Configure custom SMTP for users outside the Supabase team.
+3. Enable **Google** and enter the Google web OAuth client ID and secret in Supabase. Add the Supabase callback `https://ccbzwxgwefpmcfjoytmv.supabase.co/auth/v1/callback` in Google Cloud. For native iPhone sign-in, also create an iOS OAuth client for the bundle ID in `app.json`, fill both public Google IDs in the app environment, and rebuild. Without the iOS client configuration, the app uses the system browser session.
+4. Enable **Apple** and add the iOS bundle ID from `app.json`. To enable Apple sign-in on the web, configure an Apple Services ID, return URL, and client secret, then put the Services ID first in Supabase’s Apple Client IDs list. The published backend also supports native Apple token revocation on deletion when `APPLE_NATIVE_CLIENT_ID` and `APPLE_NATIVE_CLIENT_SECRET` are set in the Edge Function secrets. Users can revoke access in their Apple Account settings if a revocable credential is unavailable.
+5. Enable **manual identity linking** to allow signed-in users to add Apple or Google from Profile → Account settings.
+
+Open a private browser window to verify guest onboarding. With provider configuration in place, test first-time and returning sign-in, provider cancellation, email resend, cookbook transfer, sharing, and deletion with disposable accounts. Test Apple and Google on a physical iPhone development build before release.
+
 
 <details>
 <summary>Starter photo assets and prompts</summary>

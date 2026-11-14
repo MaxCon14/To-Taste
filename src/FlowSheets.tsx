@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MotionPressable as Pressable, useSceneMotion, useReducedMotion } from './motion';
 import { Glyph } from './Glyph';
 import { dietOptions, type Diet, type Recipe } from './recipes';
-import { accountsConfigured, type Account, type AccountMode, type Session, type SubmitAccount } from './pinchApi';
+import { accountsConfigured, type Account } from './cookbookApi';
 import { Action, color, Copy, Cover, font, IconButton, IngredientPreview } from './ui';
 
 export function RecipeOption({ title, description, icon, onPress }: { title: string; description: string; icon: 'link' | 'edit'; onPress: () => void }) {
@@ -71,79 +71,24 @@ export function DietSheet({ initial, close, save }: { initial: Diet; close: () =
   </Sheet>;
 }
 
-export function AccountForm({ mode, setMode, busy, submit, error, compact = false }: {
-  mode: AccountMode; setMode: (mode: AccountMode) => void; busy: boolean;
-  submit: (fields: Parameters<SubmitAccount>[1]) => void; error: string;
-  compact?: boolean;
-}) {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const emailInput = useRef<TextInput>(null);
-  const passwordInput = useRef<TextInput>(null);
-  const register = mode === 'register';
-  const send = () => {
-    if (!busy && accountsConfigured) submit({ name: name.trim(), email: email.trim(), password });
-  };
-  if (!accountsConfigured) return <Copy style={styles.helper}>Accounts are unavailable in this build. You can still use To Taste as a guest.</Copy>;
-  return <>
-    {register && <Field label="Display name" value={name} onChangeText={setName} maxLength={60} autoComplete="name" editable={!busy} returnKeyType="next" submitBehavior="submit" onSubmitEditing={() => emailInput.current?.focus()} />}
-    <Field inputRef={emailInput} label="Email" value={email} onChangeText={setEmail} maxLength={254} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" editable={!busy} returnKeyType="next" submitBehavior="submit" onSubmitEditing={() => passwordInput.current?.focus()} />
-    <Field inputRef={passwordInput} label="Password" value={password} onChangeText={setPassword} maxLength={128} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} autoComplete={register ? 'new-password' : 'current-password'} editable={!busy}
-      placeholder={register ? 'At least 10 characters' : undefined} returnKeyType="go" onSubmitEditing={send}
-      trailing={<Pressable accessibilityRole="button" accessibilityLabel={showPassword ? 'Hide password' : 'Show password'} disabled={busy} onPress={() => setShowPassword(!showPassword)} style={styles.passwordToggle}><Copy style={styles.passwordToggleLabel}>{showPassword ? 'Hide' : 'Show'}</Copy></Pressable>} />
-    {error && <Copy accessibilityRole="alert" style={styles.error}>{error}</Copy>}
-    <Action label={busy ? 'Please wait…' : register ? 'Create account' : 'Sign in'} disabled={busy} onPress={send} />
-    {compact ? <Pressable accessibilityRole="button" accessibilityLabel={register ? 'I already have an account' : 'Create an account'} disabled={busy} style={styles.accountSwitch} onPress={() => {
-      setPassword(''); setShowPassword(false); setMode(register ? 'login' : 'register');
-    }}><Copy style={styles.accountSwitchText}>{register ? 'Already have an account? Sign in' : 'New to To Taste? Create an account'}</Copy></Pressable> : <Action secondary label={register ? 'I already have an account' : 'Create an account'} disabled={busy} onPress={() => {
-      setPassword('');
-      setShowPassword(false);
-      setMode(register ? 'login' : 'register');
-    }} />}
-  </>;
-}
-
-export function validateAccount(mode: AccountMode, { name, email, password }: Parameters<SubmitAccount>[1]) {
-  if (mode === 'register' && !name) throw new Error('Enter your display name.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address.');
-  if (!password) throw new Error('Enter your password.');
-  if (mode === 'register' && password.length < 10) throw new Error('Use at least 10 characters for your password.');
-}
-
-export function AccountSheet({ close, initialMode, onSubmit, onSignedIn, sharing }: {
-  close: () => void; initialMode: AccountMode; sharing: boolean;
-  onSubmit: SubmitAccount;
-  onSignedIn: (session: Session) => Promise<void>;
-}) {
-  const [mode, setMode] = useState(initialMode);
-  const { busy, error, run, setError } = useSubmission();
-  const register = mode === 'register';
-  return <Sheet title={register ? 'Create an account' : 'Welcome back'} busy={busy} close={close}>
-    <Copy style={styles.helper}>{sharing ? 'Your recipe stays private until you review and share it.' : 'Take your recipe book with you and share dishes with the To Taste community.'}</Copy>
-    <AccountForm mode={mode} busy={busy} error={error} setMode={(next) => { setMode(next); setError(''); }}
-      submit={(fields) => void run(async () => {
-        validateAccount(mode, fields);
-        await onSignedIn(await onSubmit(mode, fields));
-      })} />
-  </Sheet>;
-}
-
 export type ShareOptions = { diet: Diet; onePan: boolean; weekend: boolean };
 
 export function ShareSheet({ recipe, account, close, share, published, unpublish }: {
-  recipe: Recipe; account: Account; close: () => void; share: (diet: Diet, onePan: boolean, weekend: boolean) => Promise<void>;
+  recipe: Recipe; account: Account; close: () => void; share: (diet: Diet, onePan: boolean, weekend: boolean, name: string) => Promise<void>;
   published?: ShareOptions; unpublish: () => Promise<void>;
 }) {
   const [diet, setDiet] = useState<Diet>(published?.diet ?? 'any');
   const [onePan, setOnePan] = useState(published?.onePan ?? false);
   const [weekend, setWeekend] = useState(published?.weekend ?? false);
+  const [name, setName] = useState(account.name);
   const { busy, error, run } = useSubmission();
   return <Sheet title="Share with the community" busy={busy} close={close}>
     <View style={styles.shareCover}><Cover recipe={recipe} /></View>
     <Copy style={styles.previewTitle}>{recipe.title}</Copy>
-    <Copy style={styles.helper}>By {account.name}. Your photo, ingredients, directions, and original link will appear in Explore if included in the recipe.</Copy>
+    <Copy style={styles.helper}>Your photo, ingredients, directions, and original link will appear in Explore if included in the recipe.</Copy>
+    {account.name
+      ? <Copy>By {account.name}</Copy>
+      : <Field label="Public display name" value={name} onChangeText={setName} maxLength={60} editable={!busy} />}
     <IngredientPreview ingredients={recipe.ingredients} />
     <Copy style={styles.choiceText}>Dietary tag</Copy>
     <DietChoices selected={diet} setDiet={setDiet} />
@@ -152,19 +97,20 @@ export function ShareSheet({ recipe, account, close, share, published, unpublish
       <Action secondary label={weekend ? '✓ Weekend' : 'Weekend'} accessibilityState={{ selected: weekend }} onPress={() => setWeekend(!weekend)} />
     </View>
     {error && <Copy accessibilityRole="alert" style={styles.error}>{error}</Copy>}
-    <Action label={busy ? 'Working…' : published ? 'Update community recipe' : 'Publish recipe'} disabled={busy} onPress={() => void run(() => share(diet, onePan, weekend))} />
+    <Action label={busy ? 'Working…' : published ? 'Update community recipe' : 'Publish recipe'} disabled={busy || !name.trim()} onPress={() => void run(() => share(diet, onePan, weekend, name.trim()))} />
     {published && <Action secondary label="Remove from Explore" disabled={busy} onPress={() => void run(unpublish)} />}
   </Sheet>;
 }
 
-export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelcome }: {
-  account: Account | null; diet: Diet; onDiet: () => void; onAuth: (mode: 'register' | 'login') => void; onLogout: () => void;
+export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelcome, onSync, onSettings }: {
+  account: Account | null; diet: Diet; onDiet: () => void; onAuth: () => void; onLogout: () => void;
+  onSync?: () => void; onSettings: () => void;
   onReplayWelcome: () => void;
 }) {
   return <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.profileScroll}>
     <View style={styles.profile}>
       <View style={styles.avatar}><Glyph name="profile" size={31} color={color.secondaryInk} /></View>
-      <Copy accessibilityRole="header" style={styles.profileTitle}>{account?.name ?? 'Your profile'}</Copy>
+      <Copy accessibilityRole="header" style={styles.profileTitle}>{account?.name || 'Your profile'}</Copy>
       {!account && <Copy style={styles.helper}>{accountsConfigured
         ? 'Create an account to sync your recipe book and share recipes with the community.'
         : 'Accounts are unavailable in this build. Your recipes are saved on this device.'}</Copy>}
@@ -172,10 +118,11 @@ export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelco
         <Copy style={styles.choiceText}>Diet preference</Copy>
         <Action secondary label={dietOptions[diet]} accessibilityLabel={`Change diet preference, ${dietOptions[diet]}`} onPress={onDiet} />
       </View>
-      {account ? <Action secondary label="Sign out" onPress={onLogout} /> : accountsConfigured && <>
-        <Action label="Create an account" onPress={() => onAuth('register')} />
-        <Action secondary label="Sign in" onPress={() => onAuth('login')} />
-      </>}
+      {accountsConfigured && onSync && <Action label="Sync your cookbook" onPress={onSync} />}
+      {account ? <>
+        <Action secondary label="Account settings" onPress={onSettings} />
+        <Action secondary label="Sign out" onPress={onLogout} />
+      </> : accountsConfigured && <Action secondary={Boolean(onSync)} label="Sign in or create an account" onPress={onAuth} />}
       <Action secondary label="Replay welcome" onPress={onReplayWelcome} />
     </View>
   </ScrollView>;

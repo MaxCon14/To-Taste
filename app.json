@@ -2,6 +2,7 @@
   "expo": {
     "name": "To Taste",
     "slug": "to-taste",
+    "scheme": "totaste",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,6 +10,7 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.pinch.cookbook"
     },
     "web": {
@@ -16,7 +18,9 @@
       "bundler": "metro"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-apple-authentication",
+      "expo-web-browser"
     ]
   }
 }

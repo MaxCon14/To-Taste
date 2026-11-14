@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
+import * as Linking from 'expo-linking';
 import { GlassNav, type Tab } from './GlassNav';
 import { MotionProvider, Scene, WebPolish } from './motion';
 import { Library, type Filter } from './Library';
@@ -13,15 +14,34 @@ import { RecipeScreen } from './RecipeScreen';
 import { featuredRecipes, lines, type Diet, type Recipe, type RecipeDraft } from './recipes';
 import { ShoppingList, type ShoppingItem } from './ShoppingList';
 import { Action, color, Copy, font } from './ui';
-import { AccountSheet, DietSheet, Profile, RecipeOption, ShareSheet, Sheet, type ShareOptions } from './FlowSheets';
-import { pinchApi, signIn, signOut, type Account, type AccountMode, type Session, type SubmitAccount } from './pinchApi';
+import { DietSheet, Profile, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
+import { AccountAccess } from './AccountAccess';
+import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readPublications, readSession, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
+import { exchangeAuthCallback, requestAccountDeletion, restoreNativeCallback, signInWithProvider } from './accountAuth';
+import { monitorSession } from './supabase';
 
 const storageKey = 'pinch.recipes.v1';
 const preferenceKey = 'pinch.preference.v1';
 const shoppingKey = 'pinch.shopping.v1';
-const onboardingPendingKey = 'pinch.onboarding.pending.v1';
+const welcomeKey = 'to-taste.welcome.v1';
+const intentKey = 'to-taste.auth-intent.v1';
 
-type Notice = { text: string; undo?: () => void; viewList?: boolean; error?: boolean };
+type Notice = { text: string; undo?: () => void; viewList?: boolean; error?: boolean; persistent?: boolean };
+type AuthIntent = { kind: 'access' | 'link'; tab: Tab; selected?: string; share?: string; created: number };
+
+function parseIntent(value: string): AuthIntent | null {
+  try {
+    const entry = JSON.parse(value) as AuthIntent;
+    return entry && (entry.kind === 'access' || entry.kind === 'link')
+      && ['explore', 'saved', 'shopping', 'profile'].includes(entry.tab)
+      && typeof entry.created === 'number' && Date.now() - entry.created < 30 * 60_000 ? entry : null;
+  } catch { return null; }
+}
+
+async function readGuestRecipes(): Promise<Recipe[]> {
+  const value = await AsyncStorage.getItem(storageKey);
+  return value ? JSON.parse(value) : [];
+}
 export default function App() {
   const [fontsReady, fontError] = useFonts({
     DMSans_400Regular: require('../assets/DMSans_400Regular.ttf'),
@@ -44,7 +64,7 @@ function Cookbook() {
   const [account, setAccount] = useState<Account | null>(null);
   const [preference, setPreference] = useState<Diet>('any');
   const [onboarding, setOnboarding] = useState(false);
-  const [resumeOnboarding, setResumeOnboarding] = useState(false);
+  const [showDietPrompt, setShowDietPrompt] = useState(false);
   const [dietSheet, setDietSheet] = useState(false);
   const [tab, setTab] = useState<Tab>('explore');
   const [filter, setFilter] = useState<Filter>('all');
@@ -55,14 +75,24 @@ function Cookbook() {
   const [form, setForm] = useState<FormState>();
   const [addMenu, setAddMenu] = useState(false);
   const [draft, setDraft] = useState<FormState>();
-  const [auth, setAuth] = useState<AccountMode>();
+  const [auth, setAuth] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [guestRecipes, setGuestRecipes] = useState<Recipe[]>([]);
+  const [syncPrompt, setSyncPrompt] = useState(false);
+  const [accountSettings, setAccountSettings] = useState(false);
+  const [deletePrompt, setDeletePrompt] = useState(false);
+  const transfer = useSubmission();
+  const settings = useSubmission();
+  const deletion = useSubmission();
   const [share, setShare] = useState<string>();
+  const [showSyncOffer, setShowSyncOffer] = useState(false);
   const [published, setPublished] = useState<Record<string, ShareOptions>>({});
   const [community, setCommunity] = useState<Recipe[]>([]);
   const latest = useRef<Recipe[]>([]);
   const writes = useRef(Promise.resolve());
   const draftWrites = useRef(Promise.resolve());
   const accountRef = useRef<Account | null>(null);
+  const applyingSession = useRef<Promise<void> | null>(null);
   const ready = recipes !== undefined;
 
   function showError(error: unknown) {
@@ -74,10 +104,14 @@ function Cookbook() {
     setReadFailed(false);
     void Promise.all([
       AsyncStorage.getItem(storageKey), AsyncStorage.getItem(preferenceKey),
-      pinchApi<Session>('session').catch(() => null),
+      restoreNativeCallback().catch(error => { if (active) setAuthError(error.message); }).then(readSession).catch(error => {
+        if (active) setAuthError(error.message);
+        return null;
+      }),
       AsyncStorage.getItem(shoppingKey),
-      AsyncStorage.getItem(onboardingPendingKey),
-    ]).then(async ([saved, localDiet, session, storedShopping, pendingOnboarding]) => {
+      AsyncStorage.getItem(welcomeKey),
+      AsyncStorage.getItem(intentKey),
+    ]).then(async ([saved, localDiet, session, storedShopping, welcomed, pendingIntent]) => {
       const data: unknown = saved === null ? [] : JSON.parse(saved);
       if (!Array.isArray(data) || !data.every((recipe) => recipe
         && typeof recipe.id === 'string' && typeof recipe.title === 'string' && typeof recipe.ingredients === 'string'
@@ -100,15 +134,27 @@ function Cookbook() {
       latest.current = user ? session!.recipes : data;
       setRecipes(latest.current);
       setDraft(savedDraft);
+      setGuestRecipes(data);
+      setShowDietPrompt(!localDiet && (!user || user.diet === 'any'));
       if (user) {
         setPreference(user.diet);
-        if (pendingOnboarding === user.id) {
-          setResumeOnboarding(true);
-          setOnboarding(true);
+        if (pendingIntent) {
+          const intent = parseIntent(pendingIntent);
+          restoreIntent(intent);
+          if (intent?.kind === 'access') setSyncPrompt(data.length > 0);
+          else if (intent?.kind === 'link') setNotice({ text: 'Sign-in method updated' });
+          void AsyncStorage.removeItem(intentKey).catch(showError);
         }
       }
       else if (localDiet === 'any' || localDiet === 'vegan' || localDiet === 'vegetarian' || localDiet === 'pescatarian') setPreference(localDiet);
-      else if (!data.length && !savedDraft) setOnboarding(true);
+      if (!user && !welcomed && !localDiet && !data.length && !savedDraft) setOnboarding(true);
+      if (!user && pendingIntent) {
+        const intent = parseIntent(pendingIntent);
+        if (intent?.kind === 'access') {
+          restoreIntent(intent);
+          setAuth(true);
+        }
+      }
     }).catch(() => { if (active) setReadFailed(true); });
     return () => { active = false; };
   }, [loadAttempt]);
@@ -141,7 +187,7 @@ function Cookbook() {
   }
 
   function refreshCommunity() {
-    void pinchApi<Recipe[]>('community').then(setCommunity).catch(() => {});
+    void readCommunity().then(setCommunity).catch(() => {});
   }
 
   useEffect(() => {
@@ -150,13 +196,13 @@ function Cookbook() {
 
   useEffect(() => {
     let active = true;
-    if (account) void pinchApi<Record<string, ShareOptions>>('share').then((posts) => { if (active) setPublished(posts); }).catch(() => {});
+    if (account) void readPublications(account.id).then((posts) => { if (active) setPublished(posts); }).catch(() => {});
     else setPublished({});
     return () => { active = false; };
   }, [account?.id]);
 
   useEffect(() => {
-    if (!notice || notice.error) return;
+    if (!notice || notice.error || notice.persistent) return;
     const timeout = setTimeout(() => setNotice(undefined), 6500);
     return () => clearTimeout(timeout);
   }, [notice]);
@@ -177,11 +223,13 @@ function Cookbook() {
       if (owner?.id !== accountRef.current?.id) throw new Error('Your account changed. Try that action again.');
       if (owner) {
         const recipe = next.find((item) => item.id === id);
-        await pinchApi('recipe', recipe ? 'PUT' : 'DELETE', recipe ?? { id });
+        await saveRecipe(owner.id, id, recipe);
       } else {
         try { await AsyncStorage.setItem(storageKey, JSON.stringify(next)); }
         catch { throw new Error('To Taste couldn’t save changes to this device. Try again.'); }
+        setGuestRecipes(next);
       }
+      if (owner?.id !== accountRef.current?.id) return;
       latest.current = next;
       setRecipes(next);
     });
@@ -212,7 +260,10 @@ function Cookbook() {
 
   function saveDiscovery(recipe: Recipe) {
     void write(recipe.id, (current) => current.some((item) => item.id === recipe.id) ? current : [{ ...recipe }, ...current])
-      .then(() => setNotice({ text: 'Saved to your recipe book', undo: () => removeDiscovery(recipe) })).catch(showError);
+      .then(() => {
+        setNotice({ text: 'Saved to your recipe book', undo: () => removeDiscovery(recipe) });
+        if (!accountRef.current) setShowSyncOffer(true);
+      }).catch(showError);
   }
 
   function removeDiscovery(recipe: Recipe) {
@@ -230,6 +281,7 @@ function Cookbook() {
     setForm(undefined);
     if (!existingId) {
       rememberDraft(undefined);
+      if (!accountRef.current) setShowSyncOffer(true);
       setNotice({ text: 'Saved to your recipe book', undo: () => {
         void write(id, (current) => current.filter((recipe) => recipe.id !== id)).then(() => {
           rememberDraft({ mode: 'manual', draft: value });
@@ -264,62 +316,151 @@ function Cookbook() {
   }
 
   async function saveDiet(diet: Diet) {
-    if (account && account.diet !== diet) {
-      const updated = await pinchApi<Account>('preferences', 'PUT', { diet });
+    const owner = accountRef.current;
+    if (owner && owner.diet !== diet) {
+      const updated = await saveProfile(owner.id, { diet });
+      if (accountRef.current?.id !== owner.id) return;
       accountRef.current = updated;
       setAccount(updated);
-    } else if (!account) await AsyncStorage.setItem(preferenceKey, diet);
+    }
+    await AsyncStorage.setItem(preferenceKey, diet);
     setPreference(diet);
     setDietSheet(false);
+    setShowDietPrompt(false);
   }
 
-  async function finishOnboarding(diet: Diet) {
-    await saveDiet(diet);
-    await AsyncStorage.removeItem(onboardingPendingKey);
-    setResumeOnboarding(false);
+  async function finishWelcome() {
+    await AsyncStorage.setItem(welcomeKey, '1');
     setTab('explore');
     setOnboarding(false);
   }
 
-  const submitAccount: SubmitAccount = (mode, fields) => signIn(mode, { ...fields, diet: preference });
+  function restoreIntent(intent: AuthIntent | null) {
+    if (!intent || Date.now() - intent.created > 30 * 60_000) return;
+    setTab(intent.tab);
+    setSelected(intent.selected);
+    setShare(intent.share);
+  }
 
-  async function applySession(session: Session) {
+  async function prepareAuth(kind: AuthIntent['kind'] = 'access') {
+    const destination = onboarding ? 'saved' : tab;
+    await AsyncStorage.setItem(intentKey, JSON.stringify({ kind, tab: destination, selected, share, created: Date.now() }));
+  }
+
+  function applySession() {
+    if (applyingSession.current) return applyingSession.current;
+    const operation = loadAccount().finally(() => { applyingSession.current = null; });
+    applyingSession.current = operation;
+    return operation;
+  }
+
+  async function loadAccount() {
+    const session = await readSession();
     const user = session.user;
     if (!user) throw new Error('To Taste couldn’t open your account. Try signing in again.');
     await writes.current;
-    const guest = latest.current;
-    let synced = session.recipes;
-    if (guest.length) {
-      try {
-        for (let start = 0; start < guest.length; start += 10) {
-          synced = await pinchApi<Recipe[]>('merge', 'POST', { recipes: guest.slice(start, start + 10) });
-        }
-        await AsyncStorage.removeItem(storageKey);
-      } catch (error) { showError(error); }
-    }
+    const wasGuest = !accountRef.current;
+    const [userDraft, guest, intent, localDiet] = await Promise.all([
+      readDraft(user), readGuestRecipes(), AsyncStorage.getItem(intentKey),
+      AsyncStorage.getItem(preferenceKey),
+    ]);
     accountRef.current = user;
     setAccount(user);
     setPreference(user.diet);
-    latest.current = synced;
-    setRecipes(synced);
-    setDraft(await readDraft(user).catch(() => undefined));
-    setAuth(undefined);
+    setShowDietPrompt(!localDiet && user.diet === 'any');
+    latest.current = session.recipes;
+    setRecipes(session.recipes);
+    setGuestRecipes(guest);
+    setDraft(userDraft);
+    setOnboarding(false);
+    setAuth(false);
+    setAuthError('');
+    setShowSyncOffer(false);
+    if (intent) restoreIntent(parseIntent(intent));
+    if (wasGuest && guest.length) setSyncPrompt(true);
+    await AsyncStorage.removeItem(intentKey);
+    await AsyncStorage.setItem(welcomeKey, '1');
   }
+
+  async function syncGuest(onlyId?: string) {
+    const id = accountRef.current?.id;
+    if (!id) throw new Error('Sign in to sync this cookbook.');
+    const operation = writes.current.then(async () => {
+      if (accountRef.current?.id !== id) throw new Error('Your account changed. Sign in and try again.');
+      const guest = await readGuestRecipes();
+      const batch = onlyId ? guest.filter(recipe => recipe.id === onlyId) : guest;
+      const cloud = await importGuestRecipes(id, batch);
+      if (accountRef.current?.id !== id) return;
+      const remaining = onlyId ? guest.filter(recipe => recipe.id !== onlyId) : [];
+      await AsyncStorage.setItem(storageKey, JSON.stringify(remaining));
+      if (accountRef.current?.id !== id) return;
+      latest.current = cloud;
+      setRecipes(cloud);
+      setGuestRecipes(remaining);
+      setSyncPrompt(false);
+      setNotice({ text: 'Recipes added to your account' });
+    });
+    writes.current = operation.catch(() => {});
+    await operation;
+  }
+
+  async function restoreGuest() {
+    if (!accountRef.current) return;
+    accountRef.current = null;
+    latest.current = [];
+    setAccount(null);
+    setRecipes([]);
+    setDraft(undefined);
+    setSelected(undefined);
+    setShare(undefined);
+    setForm(undefined);
+    setSyncPrompt(false);
+    setAccountSettings(false);
+    setDeletePrompt(false);
+    setPublished({});
+    setNotice(undefined);
+    const [guest, guestDraft, guestDiet] = await Promise.all([readGuestRecipes(), readDraft(null), AsyncStorage.getItem(preferenceKey)]);
+    latest.current = guest;
+    setRecipes(guest);
+    setGuestRecipes(guest);
+    setDraft(guestDraft);
+    setPreference(guestDiet === 'vegan' || guestDiet === 'vegetarian' || guestDiet === 'pescatarian' ? guestDiet : 'any');
+  }
+
+  useEffect(() => {
+    const stop = monitorSession(() => void restoreGuest().catch(showError));
+    const deepLink = Linking.addEventListener('url', ({ url }) => {
+      void exchangeAuthCallback(url).then(completed => { if (completed) return applySession(); }).catch(error => {
+        setAuthError(error.message);
+        showError(error);
+      });
+    });
+    return () => { stop(); deepLink.remove(); };
+  }, []);
 
   async function logout() {
     try {
       await writes.current;
-      const [saved, guestDraft, guestDiet] = await Promise.all([AsyncStorage.getItem(storageKey), readDraft(null), AsyncStorage.getItem(preferenceKey)]);
       await signOut();
-      if (guestDiet === null) void AsyncStorage.setItem(preferenceKey, 'any').catch(showError);
-      accountRef.current = null;
-      setAccount(null);
-      latest.current = saved ? JSON.parse(saved) : [];
-      setRecipes(latest.current);
-      setDraft(guestDraft);
-      setPreference(guestDiet === 'vegan' || guestDiet === 'vegetarian' || guestDiet === 'pescatarian' ? guestDiet : 'any');
+      await restoreGuest();
       setNotice({ text: 'Signed out' });
     } catch (error) { showError(error); }
+  }
+
+  function closeAuth() {
+    setAuth(false);
+    setAuthError('');
+    setShare(undefined);
+    void AsyncStorage.removeItem(intentKey).catch(showError);
+  }
+
+  function postponeSync() {
+    setSyncPrompt(false);
+    if (share && !latest.current.some(recipe => recipe.id === share)) {
+      setSelected(undefined);
+      setShare(undefined);
+      setTab('saved');
+    }
   }
 
   if (!recipes) return <View style={styles.center}>
@@ -329,14 +470,17 @@ function Cookbook() {
     </> : <ActivityIndicator color={color.secondaryInk} />}
   </View>;
 
-  if (onboarding) return <Onboarding accountName={account?.name} initialDiet={preference} resumeDiet={resumeOnboarding} onSubmit={submitAccount} onSignedIn={async (session, mode) => {
-    if (mode === 'register' && session.user) await AsyncStorage.setItem(onboardingPendingKey, session.user.id);
-    await applySession(session);
-    if (mode === 'login') {
-      setTab('explore');
-      setOnboarding(false);
-    }
-  }} finish={finishOnboarding} />;
+  const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError}
+    onGuest={() => {
+      closeAuth();
+      if (onboarding) void finishWelcome().catch(showError);
+    }} />;
+  if (onboarding) return <>
+    <Onboarding explore={() => { void finishWelcome().catch(showError); }}
+      signIn={accountsConfigured ? () => setAuth(true) : undefined} />
+    {notice?.error && <View style={[styles.notice, styles.noticeError]}><Copy accessibilityRole="alert">{notice.text}</Copy></View>}
+    {authSheet}
+  </>;
 
   const activeRecipe = recipes.find((recipe) => recipe.id === selected) ?? discoveries.find((recipe) => recipe.id === selected);
   const shareRecipe = recipes.find((recipe) => recipe.id === share);
@@ -360,7 +504,8 @@ function Cookbook() {
       <View style={[styles.safe, tab !== 'explore' && styles.inactiveTab]} pointerEvents={tab === 'explore' ? 'auto' : 'none'}
         aria-hidden={tab !== 'explore'} importantForAccessibility={tab === 'explore' ? 'auto' : 'no-hide-descendants'}>
         <Library active={tab === 'explore'} explore recipes={exploreRecipes} filter="all" setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
-          preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)} />
+          preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)}
+          onDismissDiet={showDietPrompt ? () => void saveDiet('any').catch(showError) : undefined} />
       </View>
       <View style={[styles.safe, !libraryActive && styles.inactiveTab]} pointerEvents={libraryActive ? 'auto' : 'none'}
         aria-hidden={!libraryActive} importantForAccessibility={libraryActive ? 'auto' : 'no-hide-descendants'}>
@@ -372,8 +517,9 @@ function Cookbook() {
         onRemove={(id) => void updateShopping((current) => current.filter((item) => item.id !== id))}
         onClearChecked={() => void updateShopping((current) => current.filter((item) => !item.checked))}
         onExplore={() => changeTab('explore')} />}
-      {tab === 'profile' && <Scene style={styles.safe}><Profile account={account} diet={preference} onDiet={() => setDietSheet(true)} onAuth={setAuth} onLogout={() => void logout()}
-        onReplayWelcome={() => { setResumeOnboarding(false); setOnboarding(true); }} /></Scene>}
+      {tab === 'profile' && <Scene style={styles.safe}><Profile account={account} diet={preference} onDiet={() => setDietSheet(true)} onAuth={() => setAuth(true)} onLogout={() => void logout()}
+        onSync={guestRecipes.length ? () => account ? setSyncPrompt(true) : setAuth(true) : undefined}
+        onSettings={() => setAccountSettings(true)} onReplayWelcome={() => setOnboarding(true)} /></Scene>}
     </SafeAreaView>
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
       onBack={() => setSelected(undefined)} onFavorite={() => favorite(activeRecipe.id)}
@@ -381,14 +527,17 @@ function Cookbook() {
       onSave={!recipeSaved ? () => saveDiscovery(activeRecipe) : undefined}
       onRemove={recipeSaved && !recipeEditable ? () => removeDiscovery(activeRecipe) : undefined}
       onEdit={recipeEditable ? () => setForm({ mode: 'manual', id: activeRecipe.id, draft: activeRecipe }) : undefined}
-      onShare={recipeEditable ? () => {
+      onShare={recipeEditable && accountsConfigured ? () => {
         setShare(activeRecipe.id);
-        if (!account) setAuth('register');
+        if (!account) setAuth(true);
       } : undefined} />}
     {notice && <View style={[styles.notice, notice.error && styles.noticeError]}>
       <Copy accessibilityRole={notice.error ? 'alert' : undefined} accessibilityLiveRegion="polite" style={styles.noticeText}>{notice.text}</Copy>
       {notice.undo && <Pressable accessibilityRole="button" onPress={notice.undo} style={styles.undo}><Copy style={styles.undoText}>Undo</Copy></Pressable>}
       {notice.viewList && <Pressable accessibilityRole="button" onPress={() => { setNotice(undefined); changeTab('shopping'); }} style={styles.undo}><Copy style={styles.undoText}>View list</Copy></Pressable>}
+      {notice.persistent && <Pressable accessibilityRole="button" onPress={() => setNotice(undefined)} style={styles.undo}><Copy style={styles.undoText}>Dismiss</Copy></Pressable>}
+      {accountsConfigured && !account && showSyncOffer && notice.text === 'Saved to your recipe book' &&
+        <Pressable accessibilityRole="button" onPress={() => { setShowSyncOffer(false); setNotice(undefined); setAuth(true); }} style={styles.undo}><Copy style={styles.undoText}>Sync cookbook</Copy></Pressable>}
     </View>}
     {!activeRecipe && <GlassNav tab={tab} onChange={changeTab} onAdd={() => setAddMenu(true)} adding={addMenu || Boolean(form)} />}
     {addMenu && <Sheet title="Add a recipe" close={() => setAddMenu(false)}>
@@ -398,18 +547,56 @@ function Cookbook() {
     </Sheet>}
     {form && <RecipeForm state={form} close={() => setForm(undefined)} save={save} remove={remove} onDraft={form.id ? undefined : rememberDraft} />}
     {dietSheet && <DietSheet initial={preference} close={() => setDietSheet(false)} save={saveDiet} />}
-    {auth && <AccountSheet initialMode={auth} sharing={Boolean(share)} close={() => { setAuth(undefined); setShare(undefined); }}
-      onSubmit={submitAccount} onSignedIn={applySession} />}
-    {!auth && account && shareRecipe && <ShareSheet account={account} recipe={shareRecipe} close={() => setShare(undefined)} published={published[shareRecipe.id]}
+    {authSheet}
+    {syncPrompt && account && <Sheet title="Bring your recipes with you?" busy={transfer.busy} close={postponeSync}>
+      <Copy>You have {guestRecipes.length} {guestRecipes.length === 1 ? 'recipe' : 'recipes'} on this device. Add them to your account to access them across devices.</Copy>
+      {transfer.error ? <Copy accessibilityRole="alert">{transfer.error}</Copy> : null}
+      <Action label={transfer.busy ? 'Adding recipes…' : `Add ${guestRecipes.length} ${guestRecipes.length === 1 ? 'recipe' : 'recipes'}`} disabled={transfer.busy} onPress={() => void transfer.run(() => syncGuest())} />
+      {share && guestRecipes.length > 1 && guestRecipes.some(recipe => recipe.id === share) &&
+        <Action secondary label="Add only the recipe I’m sharing" disabled={transfer.busy} onPress={() => void transfer.run(() => syncGuest(share))} />}
+      <Action secondary label="Maybe later" disabled={transfer.busy} onPress={postponeSync} />
+    </Sheet>}
+    {accountSettings && account && !deletePrompt && <Sheet title="Account" busy={settings.busy} close={() => setAccountSettings(false)}>
+      <Copy>Add a sign-in method to the account you’re using now.</Copy>
+      {(['apple', 'google'] as const).map(provider => <Action key={provider} secondary label={provider === 'apple' ? 'Link Apple' : 'Link Google'}
+        disabled={settings.busy} onPress={() => void settings.run(async () => {
+          await prepareAuth('link');
+          if (await signInWithProvider(provider, true)) {
+            await AsyncStorage.removeItem(intentKey);
+            setAccountSettings(false);
+            setNotice({ text: 'Sign-in method updated' });
+          }
+        })} />)}
+      {settings.error ? <Copy accessibilityRole="alert">{settings.error}</Copy> : null}
+      <Action secondary label="Delete account" disabled={settings.busy} onPress={() => setDeletePrompt(true)} />
+    </Sheet>}
+    {deletePrompt && account && <Sheet title="Delete your account?" busy={deletion.busy} close={() => setDeletePrompt(false)}>
+      <Copy>This permanently deletes your account, cloud cookbook, and published recipes. Shopping lists and guest recipes on this device stay here.</Copy>
+      {deletion.error ? <Copy accessibilityRole="alert">{deletion.error}</Copy> : null}
+      <Action label={deletion.busy ? 'Deleting account…' : 'Permanently delete account'} disabled={deletion.busy} onPress={() => void deletion.run(async () => {
+        await writes.current;
+        const manualRevoke = await requestAccountDeletion();
+        await AsyncStorage.removeItem(draftKey(account)).catch(() => {});
+        await restoreGuest();
+        setNotice({ text: manualRevoke ? 'Account deleted. You can remove To Taste from Sign in with Apple in your Apple Account settings.' : 'Account deleted', persistent: manualRevoke });
+      })} />
+      <Action secondary label="Cancel" disabled={deletion.busy} onPress={() => setDeletePrompt(false)} />
+    </Sheet>}
+    {!auth && !syncPrompt && account && shareRecipe && <ShareSheet account={account} recipe={shareRecipe} close={() => setShare(undefined)} published={published[shareRecipe.id]}
       unpublish={async () => {
-        await pinchApi('share', 'DELETE', { id: shareRecipe.id });
+        await unpublishRecipe(account.id, shareRecipe.id);
         forgetPost(shareRecipe.id);
         setShare(undefined);
         setNotice({ text: 'Removed from Explore' });
         refreshCommunity();
       }}
-      share={async (diet, onePan, weekend) => {
-        await pinchApi('share', 'POST', { id: shareRecipe.id, diet, onePan, weekend });
+      share={async (diet, onePan, weekend, name) => {
+        const publisher = account.name === name ? account : await saveProfile(account.id, { display_name: name });
+        await publishRecipe(publisher, shareRecipe, { diet, onePan, weekend });
+        if (accountRef.current?.id === account.id) {
+          accountRef.current = publisher;
+          setAccount(publisher);
+        }
         setPublished((posts) => ({ ...posts, [shareRecipe.id]: { diet, onePan, weekend } }));
         setShare(undefined);
         setNotice({ text: 'Shared with the community' });
