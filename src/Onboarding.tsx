@@ -4,28 +4,42 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingArtwork } from './OnboardingArtwork';
 import { Action, color, Copy, Cover, font } from './ui';
-import { DietChoices, useSubmission } from './FlowSheets';
+import { useSubmission } from './FlowSheets';
 import { MotionPressable, Scene } from './motion';
 import { Glyph } from './Glyph';
 import { allergens, allergenWarnings, cookingStyles, warningLabels, type Allergen, type CookingStyle, type Personalization } from './allergens';
-import type { Diet, Recipe } from './recipes';
+import { dietOptions, type Diet, type Recipe } from './recipes';
 
-function PreferenceChoice({ label, active, onPress, single = false }: {
-  label: string; active: boolean; onPress: () => void; single?: boolean;
+const allergenIcons: Record<Allergen, string> = {
+  gluten: '🌾', crustaceans: '🦐', eggs: '🥚', fish: '🐟', peanuts: '🥜', soy: '🫘',
+  milk: '🥛', nuts: '🌰', celery: '🥬', mustard: '🟡', sesame: '⚪', sulphites: '🍇',
+  lupin: '🌱', molluscs: '🦪',
+};
+const dietIcons: Record<Diet, string> = { any: '🍽️', vegan: '🌱', vegetarian: '🥕', pescatarian: '🐟' };
+const cookingIcons: Record<CookingStyle, string> = { any: '🍽️', quick: '⏱️', onePan: '🍳', prep: '🍱' };
+
+function PreferenceChoice({ label, active, onPress, symbol, single = false }: {
+  label: string; active: boolean; onPress: () => void; symbol?: string; single?: boolean;
 }) {
-  return <MotionPressable accessibilityRole={single ? 'radio' : 'checkbox'} aria-checked={active}
-    onPress={onPress} style={[styles.choice, active && styles.choiceActive]}>
-    <Copy style={styles.choiceLabel}>{label}</Copy>
-    <View style={[styles.choiceMark, active && styles.choiceMarkActive]}>
-      {active && <Glyph name="check" color={color.white} size={12} />}
+  return <MotionPressable accessibilityLabel={label} accessibilityRole={single ? 'radio' : 'checkbox'} aria-checked={active}
+    onPress={onPress} style={[styles.choice, single && styles.featureChoice, active && styles.choiceActive]}>
+    <View style={styles.choiceTop}>
+      <View aria-hidden style={[styles.choiceIcon, single && styles.featureIcon]}>
+        {symbol ? <Copy style={[styles.symbol, single && styles.featureSymbol]}>{symbol}</Copy>
+          : <Glyph name="check" color={color.ink} size={17} />}
+      </View>
+      <View style={[styles.choiceMark, active && styles.choiceMarkActive]}>
+        {active && <Glyph name="check" color={color.white} size={12} />}
+      </View>
     </View>
+    <Copy style={[styles.choiceLabel, single && styles.featureLabel]}>{label}</Copy>
   </MotionPressable>;
 }
 
 export function AllergenChoices({ selected, choose }: { selected: Allergen[] | null; choose: (values: Allergen[]) => void }) {
   return <View style={styles.choices}>
     <PreferenceChoice label="None" active={selected?.length === 0} onPress={() => choose([])} />
-    {(Object.keys(allergens) as Allergen[]).map(item => <PreferenceChoice key={item}
+    {(Object.keys(allergens) as Allergen[]).map(item => <PreferenceChoice key={item} symbol={allergenIcons[item]}
       label={item === 'gluten' ? 'Gluten' : item === 'nuts' ? 'Nuts' : allergens[item]}
       active={selected?.includes(item) ?? false} onPress={() => {
         const values = selected ?? [];
@@ -92,14 +106,17 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         {visibleStep === 4 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>How do you usually eat?</Copy>
           <Copy style={styles.description}>Choose one diet preference to see more recipes that suit you.</Copy>
-          <DietChoices selected={diet} setDiet={setDiet} />
+          <View accessibilityRole="radiogroup" accessibilityLabel="Diet" style={styles.choices}>
+            {(Object.keys(dietOptions) as Diet[]).map(item => <PreferenceChoice single key={item}
+              label={dietOptions[item]} symbol={dietIcons[item]} active={diet === item} onPress={() => setDiet(item)} />)}
+          </View>
           <Action label="Continue" disabled={diet === null} onPress={() => setStep(5)} />
         </>}
         {visibleStep === 5 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you like to cook?</Copy>
           <Copy style={styles.description}>Choose one cooking style to see more meals like it.</Copy>
           <View accessibilityRole="radiogroup" accessibilityLabel="Cooking style" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
-            <PreferenceChoice single key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
+            <PreferenceChoice single key={item} label={cookingStyles[item]} symbol={cookingIcons[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
           <Action label="See your recommendations" disabled={cooking === null} onPress={() => setStep(6)} />
         </>}
         {visibleStep === 6 && restored && <>
@@ -148,9 +165,16 @@ const styles = StyleSheet.create({
   description: { fontSize: 16, lineHeight: 24, color: color.secondaryInk },
   art: { alignItems: 'center', overflow: 'hidden' },
   choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
-  choice: { width: '49%', minHeight: 56, padding: 10, gap: 6, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: color.rule, backgroundColor: color.surface, borderRadius: 14 },
+  choice: { width: '49%', minHeight: 76, padding: 10, gap: 7, borderWidth: 1, borderColor: color.rule, backgroundColor: color.surface, borderRadius: 16 },
+  featureChoice: { minHeight: 118, padding: 14, gap: 12, borderRadius: 20 },
+  choiceTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  choiceIcon: { width: 30, height: 30, borderRadius: 10, backgroundColor: color.muted, alignItems: 'center', justifyContent: 'center' },
+  featureIcon: { width: 46, height: 46, borderRadius: 14 },
+  symbol: { fontSize: 17 },
+  featureSymbol: { fontSize: 26 },
   choiceActive: { borderColor: color.ink, backgroundColor: color.muted },
-  choiceLabel: { flex: 1, minWidth: 0, fontFamily: font.medium, fontSize: 14 },
+  choiceLabel: { fontFamily: font.medium, fontSize: 14, lineHeight: 19 },
+  featureLabel: { fontFamily: font.bold, fontSize: 16, lineHeight: 22 },
   choiceMark: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: color.soft, alignItems: 'center', justifyContent: 'center' },
   choiceMarkActive: { borderColor: color.ink, backgroundColor: color.ink },
   recipe: { flexDirection: 'row', backgroundColor: color.muted, borderRadius: 20, overflow: 'hidden', minHeight: 86 },
