@@ -24,8 +24,9 @@ function PreferenceChoice({ label, active, onPress, single = false }: {
 
 export function AllergenChoices({ selected, choose }: { selected: Allergen[] | null; choose: (values: Allergen[]) => void }) {
   return <View style={styles.choices}>
-    <PreferenceChoice label="No allergies" active={selected?.length === 0} onPress={() => choose([])} />
-    {(Object.keys(allergens) as Allergen[]).map(item => <PreferenceChoice key={item} label={allergens[item]}
+    <PreferenceChoice label="None" active={selected?.length === 0} onPress={() => choose([])} />
+    {(Object.keys(allergens) as Allergen[]).map(item => <PreferenceChoice key={item}
+      label={item === 'gluten' ? 'Gluten' : item === 'nuts' ? 'Nuts' : allergens[item]}
       active={selected?.includes(item) ?? false} onPress={() => {
         const values = selected ?? [];
         choose(values.includes(item) ? values.filter(value => value !== item) : [...values, item]);
@@ -84,15 +85,24 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         </>}
         {visibleStep === 3 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you need to avoid?</Copy>
-          <Copy style={styles.description}>Choose your allergens and we’ll flag matching ingredients. Always check ingredients and product labels.</Copy>
+          <Copy style={styles.description}>Select all that apply, or choose None. We’ll flag matching ingredients. Always check product labels.</Copy>
           <AllergenChoices selected={selected} choose={setSelected} />
           <Action label="Continue" disabled={selected === null} onPress={() => setStep(4)} />
         </>}
         {visibleStep === 4 && restored && <>
-          <Copy accessibilityRole="header" style={styles.title}>How do you like to cook?</Copy>
-          <DietChoices selected={diet} setDiet={setDiet} />
-          <View accessibilityRole="radiogroup" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
+          <Copy accessibilityRole="header" style={styles.title}>Make Explore yours.</Copy>
+          <Copy style={styles.description}>Choose one answer in each section to personalize your recipe recommendations.</Copy>
+          <View style={styles.preferenceSection}>
+            <Copy accessibilityRole="header" style={styles.sectionTitle}>Diet</Copy>
+            <Copy style={styles.sectionHint}>How do you usually eat?</Copy>
+            <DietChoices selected={diet} setDiet={setDiet} />
+          </View>
+          <View style={styles.preferenceSection}>
+            <Copy accessibilityRole="header" style={styles.sectionTitle}>Cooking style</Copy>
+            <Copy style={styles.sectionHint}>What kind of meals would you like to see more often?</Copy>
+            <View accessibilityRole="radiogroup" accessibilityLabel="Cooking style" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
             <PreferenceChoice single key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
+          </View>
           <Action label="See your recommendations" disabled={diet === null || cooking === null} onPress={() => setStep(5)} />
         </>}
         {visibleStep === 5 && restored && <>
@@ -139,6 +149,9 @@ const styles = StyleSheet.create({
   content: { gap: 16, paddingTop: 26 },
   title: { fontFamily: font.bold, fontSize: 36, lineHeight: 41, letterSpacing: -1.6 },
   description: { fontSize: 16, lineHeight: 24, color: color.secondaryInk },
+  preferenceSection: { gap: 8, paddingTop: 14, borderTopWidth: 1, borderTopColor: color.rule },
+  sectionTitle: { fontFamily: font.bold, fontSize: 18 },
+  sectionHint: { color: color.secondaryInk, fontSize: 14, lineHeight: 20 },
   art: { alignItems: 'center', overflow: 'hidden' },
   choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
   choice: { width: '49%', minHeight: 56, padding: 10, gap: 6, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: color.rule, backgroundColor: color.surface, borderRadius: 14 },
