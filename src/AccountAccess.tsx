@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Platform, StyleSheet, TextInput, View } from 'react-native';
 import * as Apple from 'expo-apple-authentication';
 import { Sheet, useSubmission } from './FlowSheets';
 import { requestEmailCode, signInWithProvider, verifyEmailCode, type Provider } from './accountAuth';
@@ -97,8 +97,12 @@ export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: init
               buttonStyle={Apple.AppleAuthenticationButtonStyle.BLACK} cornerRadius={25}
               style={styles.apple} onPress={() => social('apple')} />
           </View>
-        : <Action label="Continue with Apple" disabled={busy} onPress={() => social('apple')} />}
-      <Action secondary label="Continue with Google" disabled={busy} onPress={() => social('google')} />
+        : <Action label="Continue with Apple" disabled={busy} onPress={() => social('apple')}>
+            <Image accessible={false} source={require('../assets/apple-sign-in.png')} style={styles.providerIcon} resizeMode="contain" />
+          </Action>}
+      <Action secondary label="Continue with Google" disabled={busy} onPress={() => social('google')}>
+        <Image accessible={false} source={require('../assets/google-sign-in.png')} style={styles.providerIcon} resizeMode="contain" />
+      </Action>
       <Action secondary label="Continue with email" disabled={busy} onPress={() => go('email')} />
       <Action secondary label="Continue as guest" disabled={busy} onPress={onGuest} />
     </>}
@@ -129,5 +133,6 @@ const styles = StyleSheet.create({
   input: { color: color.ink, fontFamily: font.body, fontSize: 16, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13, backgroundColor: color.muted },
   code: { letterSpacing: 3 },
   apple: { width: '100%', height: 50 },
+  providerIcon: { width: 18, height: 18 },
   error: { color: color.error, fontFamily: font.medium, lineHeight: 22 },
 });
