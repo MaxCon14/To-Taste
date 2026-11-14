@@ -24,6 +24,17 @@ export async function verifyEmailCode(email: string, token: string) {
   if (!data.session) throw new Error('Sign-in didn’t finish. Request a new code and try again.');
 }
 
+export async function requestPhoneCode(phone: string) {
+  const { error } = await requireSupabase().auth.signInWithOtp({ phone, options: { channel: 'sms' } });
+  if (error) throw error;
+}
+
+export async function verifyPhoneCode(phone: string, token: string) {
+  const { data, error } = await requireSupabase().auth.verifyOtp({ phone, token, type: 'sms' });
+  if (error) throw error;
+  if (!data.session) throw new Error('Sign-in didn’t finish. Request a new code and try again.');
+}
+
 function isCallback(url: string) {
   const received = new URL(url);
   const expected = new URL(authRedirect());
