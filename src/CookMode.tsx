@@ -18,14 +18,16 @@ export function timerSuggestion(step: string) {
 
 export type CookingTimer = { ends: number; step: number };
 
-export function CookMode({ recipe, stepIndex, setStep, close, timer, setTimer }: {
+export function CookMode({ recipe, stepIndex, setStep, close, timer, setTimer, prepared, onTogglePrepared }: {
   recipe: Recipe; stepIndex: number; setStep: (index: number) => void; close: () => void;
   timer?: CookingTimer; setTimer: (timer: CookingTimer | undefined) => void;
+  prepared: number[]; onTogglePrepared: (index: number) => void;
 }) {
   const reduced = useReducedMotion();
   const [showIngredients, setShowIngredients] = useState(false);
   const [now, setNow] = useState(Date.now);
   const steps = lines(recipe.instructions);
+  const ingredients = lines(recipe.ingredients);
   const step = steps[stepIndex] ?? '';
   const suggested = timerSuggestion(step);
   const seconds = timer ? Math.max(0, Math.ceil((timer.ends - now) / 1000)) : 0;
@@ -56,12 +58,21 @@ export function CookMode({ recipe, stepIndex, setStep, close, timer, setTimer }:
       <View style={styles.header}>
         <View style={styles.titleBlock}>
           <Copy style={styles.recipe}>{recipe.title}</Copy>
-          <Copy accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.title}>Step {stepIndex + 1} of {steps.length}</Copy>
+          <Copy accessibilityRole="header" accessibilityLiveRegion="polite" style={styles.title}>
+            {showIngredients ? 'Prep checklist' : `Step ${stepIndex + 1} of ${steps.length}`}
+          </Copy>
         </View>
         <IconButton label="Exit cooking mode" onPress={close}><Glyph name="close" color={color.ink} /></IconButton>
       </View>
       <ScrollView showsVerticalScrollIndicator={false} key={showIngredients ? 'ingredients' : stepIndex} contentContainerStyle={styles.content}>
-        <Scene trigger={`${showIngredients}-${stepIndex}`}>{showIngredients ? lines(recipe.ingredients).map((line, index) => <IngredientCard key={index} line={line} />)
+        <Scene trigger={`${showIngredients}-${stepIndex}`}>{showIngredients ? <>
+          <Copy accessibilityLiveRegion="polite" style={styles.recipe}>{prepared.length} of {ingredients.length} ready</Copy>
+          {ingredients.map((line, index) => <IngredientCard key={index} line={line} checked={prepared.includes(index)}
+            toggle={() => {
+              if (Platform.OS !== 'web') void Haptics.selectionAsync().catch(() => {});
+              onTogglePrepared(index);
+            }} />)}
+        </>
           : <Copy style={styles.step}>{step}</Copy>}</Scene>
         {!showIngredients && suggested && !timer && <Action secondary label={`Start timer · ${suggested.label}`} onPress={() => {
           const start = Date.now();
@@ -79,9 +90,9 @@ export function CookMode({ recipe, stepIndex, setStep, close, timer, setTimer }:
           </View>
           <Action secondary label={seconds > 0 ? 'Cancel timer' : 'Dismiss'} onPress={() => setTimer(undefined)} />
         </View>}
-        <Action secondary label={showIngredients ? 'Back to step' : 'Check ingredients'} onPress={() => setShowIngredients(!showIngredients)}>
+        {ingredients.length > 0 && <Action secondary label={showIngredients ? 'Back to step' : 'Prep checklist'} onPress={() => setShowIngredients(!showIngredients)}>
           <Glyph name="ingredients" color={color.secondaryInk} />
-        </Action>
+        </Action>}
         {!showIngredients && <View style={styles.buttons}>
           <Action secondary style={styles.button} label="Back" disabled={stepIndex === 0} onPress={() => setStep(stepIndex - 1)} />
           <Action style={styles.button} label={last ? 'Finish' : 'Next'} onPress={() => {

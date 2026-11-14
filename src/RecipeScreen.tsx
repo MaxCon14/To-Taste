@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
-import { Animated, Linking, Platform, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { Animated, Linking, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +16,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
 }) {
   const motion = useSceneMotion(recipe.id, 24);
   useScreenFocus('recipe-title');
-  const [checked, setChecked] = useState<number[]>([]);
+  const [prepared, setPrepared] = useState<number[]>([]);
   const [shoppingSelection, setShoppingSelection] = useState<number[] | null>(null);
   const shoppingSubmission = useSubmission();
   const [section, setSection] = useState<'ingredients' | 'directions'>('ingredients');
@@ -35,6 +34,8 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
   const ingredients = lines(recipe.ingredients);
   const instructions = lines(recipe.instructions);
   const showingIngredients = section === 'ingredients';
+  const selectedCount = shoppingSelection?.length ?? 0;
+  const addLabel = selectedCount === 0 ? 'Add ingredients' : `Add ${selectedCount} ingredient${selectedCount === 1 ? '' : 's'}`;
 
   return <Animated.View style={[styles.page, motion.style]}>
     <StatusBar style={hasPhoto && photoBehindStatus ? 'light' : 'dark'} />
@@ -78,13 +79,8 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
           <Scene trigger={section}>{showingIngredients ? <View>
             <View style={styles.sectionTop}>
               <Copy accessibilityRole="header" style={styles.heading}>Ingredients</Copy>
-              <Copy accessibilityLiveRegion="polite" style={styles.progress}>{checked.length} of {ingredients.length} checked</Copy>
             </View>
-            {ingredients.map((line, index) => <IngredientCard key={index} line={line} checked={checked.includes(index)}
-              toggle={() => {
-                if (Platform.OS !== 'web') void Haptics.selectionAsync().catch(() => {});
-                setChecked((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
-              }} />)}
+            {ingredients.map((line, index) => <IngredientCard key={index} line={line} />)}
             {ingredients.length > 0 && <Action secondary label="Add to shopping list" onPress={() => {
               shoppingSubmission.setError('');
               setShoppingSelection([]);
@@ -113,8 +109,8 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
         <Glyph name="forward" color={color.white} size={17} />
       </Action>
     </View>}
-    {shoppingSelection !== null && <Sheet title="What do you need?" busy={shoppingSubmission.busy} close={() => setShoppingSelection(null)}>
-      <Copy style={styles.sourceText}>Select the ingredients you need to buy. Leave anything you already have unchecked.</Copy>
+    {shoppingSelection !== null && <Sheet title="What do you need to buy?" busy={shoppingSubmission.busy} close={() => setShoppingSelection(null)}>
+      <Copy style={styles.sourceText}>Leave anything you already have unchecked.</Copy>
       <View style={styles.sectionTop}>
         <Copy accessibilityLiveRegion="polite" style={styles.progress}>{shoppingSelection.length} selected</Copy>
         <Action secondary disabled={shoppingSubmission.busy}
@@ -130,13 +126,16 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
           }} />)}
       </View>
       {shoppingSubmission.error ? <Copy accessibilityRole="alert">{shoppingSubmission.error}</Copy> : null}
-      <Action label={shoppingSubmission.busy ? 'Adding…' : 'Add selected to shopping list'}
+      <Action label={shoppingSubmission.busy ? 'Adding…' : addLabel}
         disabled={shoppingSubmission.busy || !shoppingSelection.length} onPress={() => void shoppingSubmission.run(async () => {
           await onAddIngredients(shoppingSelection);
           setShoppingSelection(null);
         })} />
     </Sheet>}
-    {cooking && <CookMode recipe={recipe} stepIndex={cookStep} setStep={setCookStep} timer={timer} setTimer={setTimer} close={() => setCooking(false)} />}
+    {cooking && <CookMode recipe={recipe} stepIndex={cookStep} setStep={setCookStep} timer={timer} setTimer={setTimer}
+      prepared={prepared} onTogglePrepared={index => setPrepared(current => current.includes(index)
+        ? current.filter(item => item !== index) : [...current, index])}
+      close={() => setCooking(false)} />}
   </Animated.View>;
 }
 
