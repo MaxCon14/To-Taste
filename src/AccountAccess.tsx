@@ -115,10 +115,12 @@ export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: init
       <Action secondary label="Back to sign-in options" disabled={busy} onPress={() => go('options')} />
     </>}
     {!verified && step === 'code' && <>
-      <Copy style={styles.helper}>Enter the six-digit code we sent to {address}. If your email includes a sign-in link, open it on this device.</Copy>
+      <Copy style={styles.helper}>We sent a six-digit code to {address}. Copy it from your email and paste it below, or tap the code suggestion if it appears.</Copy>
       <TextInput accessibilityLabel="Verification code" placeholder="Six-digit code" style={[styles.input, styles.code]}
         value={code} onChangeText={value => setCode(value.replace(/\D/g, '').slice(0, 6))} keyboardType="number-pad"
-        autoComplete="one-time-code" editable={!busy} onSubmitEditing={verify} />
+        autoComplete={Platform.OS === 'ios' ? undefined : 'one-time-code'}
+        textContentType={Platform.OS === 'ios' ? 'oneTimeCode' : undefined}
+        editable={!busy} onSubmitEditing={verify} />
       <Action label="Verify email" disabled={busy || code.length !== 6} onPress={verify} />
       <Action secondary label={remaining ? `Resend code in ${remaining}s` : 'Resend code'} disabled={busy || remaining > 0} onPress={send} />
       <Action secondary label="Change email" disabled={busy} onPress={() => go('email')} />
