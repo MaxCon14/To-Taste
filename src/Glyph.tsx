@@ -10,6 +10,7 @@ import Share from 'lucide-react-native/icons/share';
 import Timer from 'lucide-react-native/icons/timer';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Heart from 'lucide-react-native/icons/heart';
+import Star from 'lucide-react-native/icons/star';
 import Link2 from 'lucide-react-native/icons/link-2';
 import Pencil from 'lucide-react-native/icons/pencil';
 import Plus from 'lucide-react-native/icons/plus';
@@ -34,6 +35,8 @@ const symbols = {
   forward: ['arrow.right', ArrowRight],
   heart: ['heart', Heart],
   'heart-filled': ['heart.fill', Heart],
+  star: ['star', Star],
+  'star-filled': ['star.fill', Star],
   ingredients: ['fork.knife', Utensils],
   link: ['link', Link2],
   plus: ['plus', Plus],
@@ -47,5 +50,5 @@ export function Glyph({ name, color, size = 18 }: { name: keyof typeof symbols; 
   const [symbol, Icon] = symbols[name];
   return Platform.OS === 'ios'
     ? <SymbolView accessible={false} name={symbol} tintColor={color} weight="medium" size={size} />
-    : <Icon accessible={false} color={color} size={size} strokeWidth={1.65} fill={name === 'heart-filled' ? color : 'none'} />;
+    : <Icon accessible={false} color={color} size={size} strokeWidth={1.65} fill={name === 'heart-filled' || name === 'star-filled' ? color : 'none'} />;
 }

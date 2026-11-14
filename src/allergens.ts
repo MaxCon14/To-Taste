@@ -30,9 +30,9 @@ const explicit: Record<Allergen, RegExp> = {
   lupin: /\blupin(?:e|s)?\b/i, molluscs: /\b(mussels?|oysters?|squid|clams?|octopus|scallops?|snails?)\b/i,
 };
 const uncertain: Partial<Record<Allergen, RegExp>> = {
-  gluten: /\b(flour|pasta|bread|breadcrumbs|soy sauce|stock)\b/i,
+  gluten: /\b(flour|pasta|rigatoni|penne|spaghetti|noodles|bread|breadcrumbs|soy sauce|stock)\b/i,
   milk: /\b(cream|butter|chocolate|pesto)\b/i,
-  eggs: /\b(mayonnaise|pasta|noodles)\b/i,
+  eggs: /\b(mayonnaise|pasta|rigatoni|penne|spaghetti|noodles)\b/i,
   nuts: /\b(pesto|mixed nuts)\b/i,
   fish: /\b(worcestershire|caesar dressing)\b/i,
   celery: /\b(stock|bouillon)\b/i,

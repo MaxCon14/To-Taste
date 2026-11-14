@@ -9,12 +9,15 @@ import { CookMode, type CookingTimer } from './CookMode';
 import { Sheet, useSubmission } from './FlowSheets';
 import { dietOptions, lines, type Recipe } from './recipes';
 import { allergenWarnings, allergens as allergenNames, warningLabels, type Allergen } from './allergens';
+import { RecipeReviews } from './RecipeReviews';
+import { reviewTarget } from './reviewApi';
 import { Action, color, Copy, Cover, Favorite, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
 
-export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients, allergens = [] }: {
+export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients, allergens = [], reviewerId }: {
   recipe: Recipe; onBack: () => void; onEdit?: () => void; onFavorite: () => void; onShare?: () => void; onSave?: () => void; onRemove?: () => void;
   onAddIngredients: (indices: number[]) => Promise<void>;
   allergens?: Allergen[];
+  reviewerId?: string;
 }) {
   const motion = useSceneMotion(recipe.id, 24);
   useScreenFocus('recipe-title');
@@ -34,7 +37,10 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
   const hasPhoto = Boolean(recipe.cover || recipe.photo);
   const heroHeight = hasPhoto ? wide ? 487 : Math.max(355, Math.min(490, height * 0.53)) : wide ? 300 : 255;
   const ingredients = lines(recipe.ingredients);
-  const warnings = allergenWarnings(recipe.ingredients, allergens);
+  const listedAllergens = Object.keys(allergenNames) as Allergen[];
+  const matches = allergenWarnings(recipe.ingredients, listedAllergens);
+  const warnings = matches.filter(match => allergens.includes(match.allergen));
+  const flagged = listedAllergens.filter(allergen => matches.some(match => match.allergen === allergen));
   const instructions = lines(recipe.instructions);
   const showingIngredients = section === 'ingredients';
   const selectedCount = shoppingSelection?.length ?? 0;
@@ -81,6 +87,16 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
             </Copy>)}
             <Copy>Check the full ingredient list and product labels for allergens and cross-contact before cooking.</Copy>
           </View>}
+          <View style={styles.allergenSection}>
+            <Copy accessibilityRole="header" style={styles.heading}>Allergens</Copy>
+            {flagged.length ? <View style={styles.allergenTags}>{flagged.map(allergen => {
+              const confirmed = matches.some(match => match.allergen === allergen && match.confirmed);
+              return <Copy key={allergen} style={styles.allergenTag}>
+                {confirmed ? 'Contains' : 'Check for'} {allergenNames[allergen].toLowerCase()}
+              </Copy>;
+            })}</View> : <Copy style={styles.allergenHelp}>No allergens flagged in the listed ingredients.</Copy>}
+            <Copy style={styles.allergenHelp}>Based on ingredient text. Check product labels and possible cross-contact.</Copy>
+          </View>
           {onSave && <Action secondary label="Save to recipe book" onPress={onSave}><Glyph name="book" color={color.ink} /></Action>}
           <View style={[segmentTrack, wide && styles.tabsWide]}>
             <Segment label="Ingredients" active={showingIngredients} onPress={() => setSection('ingredients')} />
@@ -112,6 +128,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
           }}><Copy style={styles.sourceText}>Original recipe</Copy><Glyph name="external" color={color.secondaryInk} size={15} /></Pressable>}
           {sourceError && <Copy accessibilityRole="alert" style={styles.sourceText}>Couldn’t open the original recipe.</Copy>}
           {onShare && <Action secondary label="Share with the community" onPress={onShare}><Glyph name="share" color={color.ink} /></Action>}
+          {reviewerId && reviewTarget(recipe.id) && <RecipeReviews recipeId={recipe.id} userId={reviewerId} />}
           {onRemove && <Action secondary label="Remove from recipe book" onPress={onRemove} />}
         </View>
       </View>
@@ -155,6 +172,10 @@ const styles = StyleSheet.create({
   allergyPanel: { padding: 16, borderRadius: 16, gap: 8, backgroundColor: '#FFF2EF' },
   allergyIngredient: { backgroundColor: '#FFF2EF', borderRadius: 8 },
   allergyTitle: { color: color.error, fontFamily: font.bold, fontSize: 16 },
+  allergenSection: { borderWidth: 1, borderColor: color.rule, borderRadius: 20, padding: 16, gap: 10 },
+  allergenTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  allergenTag: { fontFamily: font.medium, backgroundColor: color.muted, borderRadius: 10, paddingVertical: 6, paddingHorizontal: 9, fontSize: 13 },
+  allergenHelp: { color: color.secondaryInk, fontSize: 13, lineHeight: 19 },
   wideAction: { width: '100%', maxWidth: 440, minHeight: 58, alignSelf: 'center' },
   shoppingAction: { marginTop: 18 },
   page: { flex: 1, backgroundColor: color.surface },

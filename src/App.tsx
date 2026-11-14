@@ -536,6 +536,7 @@ function Cookbook() {
         onSettings={() => setAccountSettings(true)} onReplayWelcome={() => setOnboarding(true)} /></Scene>}
     </SafeAreaView>
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
+      reviewerId={account.id}
       allergens={account.personalization?.allergens}
       onBack={() => setSelected(undefined)} onFavorite={() => favorite(activeRecipe.id)}
       onAddIngredients={(indices) => addIngredients(activeRecipe, indices)}
