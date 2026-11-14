@@ -3,16 +3,29 @@ import { Image, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingArtwork } from './OnboardingArtwork';
-import { Action, color, Copy, Cover, font, Segment } from './ui';
+import { Action, color, Copy, Cover, font } from './ui';
 import { DietChoices, useSubmission } from './FlowSheets';
-import { Scene } from './motion';
+import { MotionPressable, Scene } from './motion';
+import { Glyph } from './Glyph';
 import { allergens, allergenWarnings, cookingStyles, warningLabels, type Allergen, type CookingStyle, type Personalization } from './allergens';
 import type { Diet, Recipe } from './recipes';
 
+function PreferenceChoice({ label, active, onPress, single = false }: {
+  label: string; active: boolean; onPress: () => void; single?: boolean;
+}) {
+  return <MotionPressable accessibilityRole={single ? 'radio' : 'checkbox'} aria-checked={active}
+    onPress={onPress} style={[styles.choice, active && styles.choiceActive]}>
+    <Copy style={styles.choiceLabel}>{label}</Copy>
+    <View style={[styles.choiceMark, active && styles.choiceMarkActive]}>
+      {active && <Glyph name="check" color={color.white} size={12} />}
+    </View>
+  </MotionPressable>;
+}
+
 export function AllergenChoices({ selected, choose }: { selected: Allergen[] | null; choose: (values: Allergen[]) => void }) {
   return <View style={styles.choices}>
-    <Segment label="No allergies" active={selected?.length === 0} onPress={() => choose([])} />
-    {(Object.keys(allergens) as Allergen[]).map(item => <Segment key={item} label={allergens[item]}
+    <PreferenceChoice label="No allergies" active={selected?.length === 0} onPress={() => choose([])} />
+    {(Object.keys(allergens) as Allergen[]).map(item => <PreferenceChoice key={item} label={allergens[item]}
       active={selected?.includes(item) ?? false} onPress={() => {
         const values = selected ?? [];
         choose(values.includes(item) ? values.filter(value => value !== item) : [...values, item]);
@@ -78,8 +91,8 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         {visibleStep === 4 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>How do you like to cook?</Copy>
           <DietChoices selected={diet} setDiet={setDiet} />
-          <View style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
-            <Segment key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
+          <View accessibilityRole="radiogroup" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
+            <PreferenceChoice single key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
           <Action label="See your recommendations" disabled={diet === null || cooking === null} onPress={() => setStep(5)} />
         </>}
         {visibleStep === 5 && restored && <>
@@ -127,7 +140,12 @@ const styles = StyleSheet.create({
   title: { fontFamily: font.bold, fontSize: 36, lineHeight: 41, letterSpacing: -1.6 },
   description: { fontSize: 16, lineHeight: 24, color: color.secondaryInk },
   art: { alignItems: 'center', overflow: 'hidden' },
-  choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
+  choice: { width: '49%', minHeight: 56, padding: 10, gap: 6, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: color.rule, backgroundColor: color.surface, borderRadius: 14 },
+  choiceActive: { borderColor: color.ink, backgroundColor: color.muted },
+  choiceLabel: { flex: 1, minWidth: 0, fontFamily: font.medium, fontSize: 14 },
+  choiceMark: { width: 18, height: 18, borderRadius: 9, borderWidth: 1, borderColor: color.soft, alignItems: 'center', justifyContent: 'center' },
+  choiceMarkActive: { borderColor: color.ink, backgroundColor: color.ink },
   recipe: { flexDirection: 'row', backgroundColor: color.muted, borderRadius: 20, overflow: 'hidden', minHeight: 86 },
   cover: { width: 86 },
   recipeCopy: { flex: 1, padding: 12, justifyContent: 'center', gap: 5 },
