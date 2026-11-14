@@ -5,9 +5,8 @@ import { Sheet, useSubmission } from './FlowSheets';
 import { requestPhoneCode, signInWithProvider, verifyPhoneCode, type Provider } from './accountAuth';
 import { Action, color, Copy, font } from './ui';
 
-export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: initialError }: {
+export function AccountAccess({ close, onSignedIn, prepare, error: initialError }: {
   close: () => void;
-  onGuest: () => void;
   onSignedIn: () => Promise<void>;
   prepare: () => Promise<void>;
   error?: string;
@@ -18,6 +17,7 @@ export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: init
   const [resendAt, setResendAt] = useState(0);
   const [now, setNow] = useState(Date.now);
   const [nativeApple, setNativeApple] = useState(false);
+  const [available, setAvailable] = useState<{ apple?: boolean; google?: boolean; phone?: boolean }>();
   const [verified, setVerified] = useState(false);
   const { busy, error, setError, run } = useSubmission();
   useEffect(() => {
@@ -25,6 +25,16 @@ export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: init
   }, [initialError, setError]);
   useEffect(() => {
     if (Platform.OS === 'ios') void Apple.isAvailableAsync().then(setNativeApple).catch(() => {});
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/auth/v1/settings`, {
+      headers: { apikey: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '' }, signal: controller.signal,
+    }).then(async response => {
+      if (!response.ok) throw new Error();
+      setAvailable((await response.json()).external ?? {});
+    }).catch(() => { if (!controller.signal.aborted) setAvailable({}); });
+    return () => controller.abort();
   }, []);
   useEffect(() => {
     if (step !== 'code') return;
@@ -99,7 +109,10 @@ export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: init
     {verified && <Action label="Try again" disabled={busy} onPress={verify} />}
     {!verified && step === 'options' && <>
       <Copy style={styles.helper}>Keep your saved recipes across devices.</Copy>
-      {nativeApple
+      {available?.google && <Action label="Continue with Google" disabled={busy} onPress={() => social('google')}>
+        <Image accessible={false} source={require('../assets/google-sign-in.png')} style={styles.providerIcon} resizeMode="contain" />
+      </Action>}
+      {available?.apple && (nativeApple
         ? <View pointerEvents={busy ? 'none' : 'auto'} accessibilityElementsHidden={busy}>
             <Apple.AppleAuthenticationButton buttonType={Apple.AppleAuthenticationButtonType.CONTINUE}
               buttonStyle={Apple.AppleAuthenticationButtonStyle.BLACK} cornerRadius={25}
@@ -107,12 +120,10 @@ export function AccountAccess({ close, onGuest, onSignedIn, prepare, error: init
           </View>
         : <Action label="Continue with Apple" disabled={busy} onPress={() => social('apple')}>
             <Image accessible={false} source={require('../assets/apple-sign-in.png')} style={styles.providerIcon} resizeMode="contain" />
-          </Action>}
-      <Action secondary label="Continue with Google" disabled={busy} onPress={() => social('google')}>
-        <Image accessible={false} source={require('../assets/google-sign-in.png')} style={styles.providerIcon} resizeMode="contain" />
-      </Action>
-      <Action secondary label="Continue with phone" disabled={busy} onPress={() => go('contact')} />
-      <Action secondary label="Continue as guest" disabled={busy} onPress={onGuest} />
+          </Action>)}
+      {available?.phone && <Action secondary label="Continue with phone" disabled={busy} onPress={() => go('contact')} />}
+      {!available && <Copy accessibilityLiveRegion="polite">Checking sign-in options…</Copy>}
+      {available && !available.google && !available.apple && !available.phone && <Copy accessibilityRole="alert">Sign-in options are unavailable. Close and reopen to try again.</Copy>}
     </>}
     {!verified && step === 'contact' && <>
       <Copy style={styles.helper}>Include your country code. We’ll text you a sign-in code.</Copy>

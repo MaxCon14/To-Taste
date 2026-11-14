@@ -8,11 +8,13 @@ import { Glyph } from './Glyph';
 import { CookMode, type CookingTimer } from './CookMode';
 import { Sheet, useSubmission } from './FlowSheets';
 import { dietOptions, lines, type Recipe } from './recipes';
+import { allergenWarnings, allergens as allergenNames, warningLabels, type Allergen } from './allergens';
 import { Action, color, Copy, Cover, Favorite, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
 
-export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients }: {
+export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients, allergens = [] }: {
   recipe: Recipe; onBack: () => void; onEdit?: () => void; onFavorite: () => void; onShare?: () => void; onSave?: () => void; onRemove?: () => void;
   onAddIngredients: (indices: number[]) => Promise<void>;
+  allergens?: Allergen[];
 }) {
   const motion = useSceneMotion(recipe.id, 24);
   useScreenFocus('recipe-title');
@@ -32,6 +34,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
   const hasPhoto = Boolean(recipe.cover || recipe.photo);
   const heroHeight = hasPhoto ? wide ? 487 : Math.max(355, Math.min(490, height * 0.53)) : wide ? 300 : 255;
   const ingredients = lines(recipe.ingredients);
+  const warnings = allergenWarnings(recipe.ingredients, allergens);
   const instructions = lines(recipe.instructions);
   const showingIngredients = section === 'ingredients';
   const selectedCount = shoppingSelection?.length ?? 0;
@@ -71,6 +74,13 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
           </View>
         </View>
         <View style={[styles.body, wide && styles.bodyWide]}>
+          {allergens.length > 0 && (warnings.length > 0 || recipe.source) && <View style={styles.allergyPanel}>
+            <Copy accessibilityRole="header" style={styles.allergyTitle}>{warnings.length ? warningLabels(warnings).join(' · ') : 'Review imported ingredients'}</Copy>
+            {warnings.map(({ allergen, line, confirmed }, index) => <Copy key={index}>
+              {confirmed ? 'Contains' : 'Check for'} {allergenNames[allergen].toLowerCase()} · {line}
+            </Copy>)}
+            <Copy>Check the full ingredient list and product labels for allergens and cross-contact before cooking.</Copy>
+          </View>}
           {onSave && <Action secondary label="Save to recipe book" onPress={onSave}><Glyph name="book" color={color.ink} /></Action>}
           <View style={[segmentTrack, wide && styles.tabsWide]}>
             <Segment label="Ingredients" active={showingIngredients} onPress={() => setSection('ingredients')} />
@@ -80,7 +90,9 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
             <View style={styles.sectionTop}>
               <Copy accessibilityRole="header" style={styles.heading}>Ingredients</Copy>
             </View>
-            {ingredients.map((line, index) => <IngredientCard key={index} line={line} />)}
+            {ingredients.map((line, index) => <View key={index} style={warnings.some(warning => warning.line.trim() === line) && styles.allergyIngredient}>
+              <IngredientCard line={line} />
+            </View>)}
             {ingredients.length > 0 && <Action secondary label="Add to shopping list" onPress={() => {
               shoppingSubmission.setError('');
               setShoppingSelection([]);
@@ -140,6 +152,9 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
 }
 
 const styles = StyleSheet.create({
+  allergyPanel: { padding: 16, borderRadius: 16, gap: 8, backgroundColor: '#FFF2EF' },
+  allergyIngredient: { backgroundColor: '#FFF2EF', borderRadius: 8 },
+  allergyTitle: { color: color.error, fontFamily: font.bold, fontSize: 16 },
   wideAction: { width: '100%', maxWidth: 440, minHeight: 58, alignSelf: 'center' },
   shoppingAction: { marginTop: 18 },
   page: { flex: 1, backgroundColor: color.surface },

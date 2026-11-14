@@ -50,7 +50,7 @@ export function useSubmission() {
   return { busy, error, run, setError };
 }
 
-export function DietChoices({ selected, setDiet }: { selected: Diet; setDiet: (diet: Diet) => void }) {
+export function DietChoices({ selected, setDiet }: { selected: Diet | null; setDiet: (diet: Diet) => void }) {
   const descriptions = { any: 'A little of everything', vegan: 'All about plants', vegetarian: 'Plants, dairy & eggs', pescatarian: 'Plants & seafood' };
   return <View accessibilityRole="radiogroup" style={styles.diets}>
     {(Object.keys(dietOptions) as Diet[]).map((diet) => <Pressable key={diet} accessibilityRole="radio" aria-checked={selected === diet}
@@ -123,7 +123,7 @@ export function Profile({ account, diet, onDiet, onAuth, onLogout, onReplayWelco
         <Action secondary label="Account settings" onPress={onSettings} />
         <Action secondary label="Sign out" onPress={onLogout} />
       </> : accountsConfigured && <Action secondary={Boolean(onSync)} label="Sign in or create an account" onPress={onAuth} />}
-      <Action secondary label="Replay welcome" onPress={onReplayWelcome} />
+      <Action secondary label="Allergies and cooking preferences" onPress={onReplayWelcome} />
     </View>
   </ScrollView>;
 }

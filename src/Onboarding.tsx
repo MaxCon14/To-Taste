@@ -1,88 +1,141 @@
-import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingArtwork } from './OnboardingArtwork';
-import { Action, color, Copy, font } from './ui';
+import { Action, color, Copy, Cover, font, Segment } from './ui';
 import { DietChoices, useSubmission } from './FlowSheets';
 import { Scene } from './motion';
-import { Glyph } from './Glyph';
-import type { Diet } from './recipes';
+import { allergens, allergenWarnings, cookingStyles, warningLabels, type Allergen, type CookingStyle, type Personalization } from './allergens';
+import type { Diet, Recipe } from './recipes';
 
-export function Onboarding({ explore, signIn, initialDiet }: { explore: (diet?: Diet) => Promise<void>; signIn?: () => void; initialDiet: Diet }) {
-  const { width, height } = useWindowDimensions();
-  const wide = width >= 880;
-  const [personalize, setPersonalize] = useState(false);
-  const [diet, setDiet] = useState(initialDiet);
+export function AllergenChoices({ selected, choose }: { selected: Allergen[] | null; choose: (values: Allergen[]) => void }) {
+  return <View style={styles.choices}>
+    <Segment label="No allergies" active={selected?.length === 0} onPress={() => choose([])} />
+    {(Object.keys(allergens) as Allergen[]).map(item => <Segment key={item} label={allergens[item]}
+      active={selected?.includes(item) ?? false} onPress={() => {
+        const values = selected ?? [];
+        choose(values.includes(item) ? values.filter(value => value !== item) : [...values, item]);
+      }} />)}
+  </View>;
+}
+
+export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, complete, edit = false, cancel }: {
+  accountId?: string; signIn?: () => void; initialDiet: Diet; initial?: Personalization; recipes: Recipe[];
+  complete: (diet: Diet, preferences: Personalization) => Promise<void>; edit?: boolean; cancel?: () => void;
+}) {
+  const [step, setStep] = useState(accountId ? 3 : 1);
+  const [restored, setRestored] = useState(!accountId || edit);
+  const [selected, setSelected] = useState<Allergen[] | null>(initial?.allergens ?? null);
+  const [diet, setDiet] = useState<Diet | null>(edit ? initialDiet : null);
+  const [cooking, setCooking] = useState<CookingStyle | null>(initial?.cooking ?? null);
   const { busy, error, run } = useSubmission();
+  const draftKey = accountId && !edit ? `to-taste.onboarding.${accountId}` : undefined;
+  useEffect(() => {
+    if (!draftKey) return;
+    let active = true;
+    void AsyncStorage.getItem(draftKey).then(value => {
+      if (!active || !value) return;
+      const draft = JSON.parse(value);
+      setSelected(draft.selected);
+      setDiet(draft.diet);
+      setCooking(draft.cooking);
+      setStep(draft.step);
+    }).catch(() => {}).finally(() => { if (active) setRestored(true); });
+    return () => { active = false; };
+  }, [draftKey]);
+  useEffect(() => {
+    if (draftKey && restored) void AsyncStorage.setItem(draftKey, JSON.stringify({ step, selected, diet, cooking })).catch(() => {});
+  }, [draftKey, restored, step, selected, diet, cooking]);
+  const visibleStep = accountId ? Math.max(3, step) : Math.min(2, step);
+  const recommendations = recipes.map(recipe => ({ recipe, warnings: allergenWarnings(recipe.ingredients, selected ?? []) }))
+    .sort((a, b) => Number(!!a.warnings.length) - Number(!!b.warnings.length)
+      || Number(b.recipe.discovery?.diet === diet) - Number(a.recipe.discovery?.diet === diet)
+      || Number(matchesCooking(b.recipe, cooking)) - Number(matchesCooking(a.recipe, cooking))).slice(0, 3);
+
   return <SafeAreaView style={styles.screen}>
-    <ScrollView contentContainerStyle={[styles.scroll, wide && styles.scrollWide]}>
-      <View style={[styles.shell, wide && styles.shellWide]}>
-        <View style={styles.header}>
-          <View style={styles.brand}>
-            <Image source={require('../assets/icon.png')} style={styles.mark} />
-            <Copy style={styles.wordmark}>To Taste</Copy>
-          </View>
-          <Copy accessibilityLabel={personalize ? 'Step 2 of 2' : 'Step 1 of 2'} style={styles.progressLabel}>{personalize ? '02' : '01'} / 02</Copy>
-        </View>
-        <View style={styles.progressTrack} accessible={false}>
-          <View style={[styles.progressFill, { width: personalize ? '100%' : '50%' }]} />
-        </View>
-        <Scene key={String(personalize)} style={[styles.main, wide && styles.mainWide]}>
-          <View style={[styles.artPanel, wide && styles.artPanelWide]}>
-            {(!personalize || wide) && <OnboardingArtwork scene={personalize ? 'ingredients' : 'cookbook'} size={wide ? Math.min(470, width - 550) : Math.min(width - 48, 360, Math.max(180, height - 395))} />}
-          </View>
-          <View style={[styles.panel, wide && styles.panelWide]}>
-            <View style={styles.content}>
-              {personalize ? <>
-                <Copy accessibilityRole="header" style={[styles.title, wide && styles.titleWide]}>How do you eat?</Copy>
-                <Copy style={styles.description}>We’ll bring recipes that match your preference to the top of Explore. You can change this anytime.</Copy>
-                <DietChoices selected={diet} setDiet={setDiet} />
-                {error ? <Copy accessibilityRole="alert" style={styles.error}>{error}</Copy> : null}
-                <View style={styles.actions}>
-                  <Action label={busy ? 'Opening…' : 'Explore recipes'} disabled={busy} onPress={() => void run(() => explore(diet))} style={styles.primary} />
-                  <Action secondary label="Skip for now" disabled={busy} onPress={() => void run(() => explore())} />
-                  <Action secondary label="Back" disabled={busy} onPress={() => setPersonalize(false)}><Glyph name="back" color={color.ink} size={16} /></Action>
-                </View>
-              </> : <>
-                <Copy accessibilityRole="header" style={[styles.title, wide && styles.titleWide]}>{'All your recipes.\nReady to cook.'}</Copy>
-                <Copy style={styles.description}>Save recipes from anywhere, shop for what you need, and cook step by step.</Copy>
-                <View style={styles.actions}>
-                  <Action label="Get started" onPress={() => setPersonalize(true)} style={styles.primary}><Glyph name="forward" color={color.white} size={16} /></Action>
-                  {signIn && <Action secondary label="Sign in or create an account" onPress={signIn} />}
-                </View>
-              </>}
-            </View>
-          </View>
-        </Scene>
+    <ScrollView key={visibleStep} contentContainerStyle={styles.scroll}>
+      <View style={styles.header}>
+        <Image source={require('../assets/icon.png')} style={styles.mark} />
+        <Copy style={styles.brand}>To Taste</Copy>
+        <Copy style={styles.progressLabel}>{visibleStep} / 5</Copy>
       </View>
+      <View style={styles.track}><View style={[styles.fill, { width: `${visibleStep * 20}%` }]} /></View>
+      <Scene key={visibleStep} style={styles.content}>
+        {visibleStep === 1 && <>
+          <View style={styles.art}><OnboardingArtwork scene="cookbook" size={290} /></View>
+          <Copy accessibilityRole="header" style={styles.title}>All your recipes. Ready to cook.</Copy>
+          <Copy style={styles.description}>Save the recipes you love and discover meals that suit the way you eat.</Copy>
+          <Action label="Get started" onPress={() => setStep(2)} />
+          {signIn && <Action secondary label="Sign in" onPress={signIn} />}
+        </>}
+        {visibleStep === 2 && <>
+          <Copy accessibilityRole="header" style={styles.title}>Make it yours.</Copy>
+          <Copy style={styles.description}>Create an account to save your cookbook and carry your preferences across devices.</Copy>
+          {signIn ? <Action label="Create account or sign in" onPress={signIn} /> : <Copy>Accounts are unavailable in this build.</Copy>}
+        </>}
+        {visibleStep === 3 && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>What do you need to avoid?</Copy>
+          <Copy style={styles.description}>Choose your allergens and we’ll flag matching ingredients. Always check ingredients and product labels.</Copy>
+          <AllergenChoices selected={selected} choose={setSelected} />
+          <Action label="Continue" disabled={selected === null} onPress={() => setStep(4)} />
+        </>}
+        {visibleStep === 4 && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>How do you like to cook?</Copy>
+          <DietChoices selected={diet} setDiet={setDiet} />
+          <View style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
+            <Segment key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
+          <Action label="See your recommendations" disabled={diet === null || cooking === null} onPress={() => setStep(5)} />
+        </>}
+        {visibleStep === 5 && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>Your first recipes.</Copy>
+          <Copy style={styles.description}>A few ideas to get you cooking. Check the full ingredient list before you start.</Copy>
+          {recommendations.map(({ recipe, warnings }) => <View style={styles.recipe} key={recipe.id}>
+            <View style={styles.cover}><Cover recipe={recipe} /></View>
+            <View style={styles.recipeCopy}><Copy style={styles.recipeTitle}>{recipe.title}</Copy>
+              {warningLabels(warnings).map(label => <Copy style={styles.warning} key={label}>{label}</Copy>)}
+            </View>
+          </View>)}
+          <Action label={busy ? 'Saving…' : 'Open Explore'} disabled={busy} onPress={() => void run(async () => {
+            if (selected !== null && diet !== null && cooking !== null) {
+              await complete(diet, { allergens: selected, cooking });
+              if (draftKey) void AsyncStorage.removeItem(draftKey).catch(() => {});
+            }
+          })} />
+        </>}
+        {error ? <Copy accessibilityRole="alert" style={styles.warning}>{error}</Copy> : null}
+        {!restored && <Copy accessibilityLiveRegion="polite">Opening your preferences…</Copy>}
+        {(visibleStep === 2 || visibleStep > 3) && <Action secondary label="Back" disabled={busy} onPress={() => setStep(visibleStep - 1)} />}
+        {cancel && <Action secondary label="Cancel edits" disabled={busy} onPress={cancel} />}
+      </Scene>
     </ScrollView>
   </SafeAreaView>;
 }
 
+export function matchesCooking(recipe: Recipe, cooking?: CookingStyle | null) {
+  if (cooking === 'quick') return Number(recipe.minutes) > 0 && Number(recipe.minutes) <= 30;
+  if (cooking === 'onePan') return !!recipe.discovery?.onePan;
+  if (cooking === 'prep') return Number.parseInt(recipe.servings, 10) >= 4;
+  return false;
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: color.paper },
-  scroll: { flexGrow: 1, alignItems: 'center', paddingHorizontal: 24, paddingVertical: 18 },
-  scrollWide: { paddingHorizontal: 48, paddingVertical: 28, justifyContent: 'center' },
-  shell: { width: '100%', maxWidth: 460, flexGrow: 1 },
-  shellWide: { maxWidth: 1180, flexGrow: 0 },
-  header: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  scroll: { width: '100%', maxWidth: 540, alignSelf: 'center', padding: 24, paddingBottom: 42 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   mark: { width: 36, height: 36, borderRadius: 11 },
-  progressLabel: { color: color.secondaryInk, fontFamily: font.medium, fontSize: 12 },
-  progressTrack: { height: 3, borderRadius: 3, overflow: 'hidden', backgroundColor: color.rule, marginTop: 14 },
-  progressFill: { height: '100%', backgroundColor: color.ink },
-  wordmark: { fontFamily: font.bold, fontSize: 28, letterSpacing: -1.3 },
-  main: { flex: 1, justifyContent: 'center', paddingVertical: 12 },
-  mainWide: { flexDirection: 'row', alignItems: 'center', gap: 64, paddingVertical: 42, minHeight: 650 },
-  artPanel: { alignItems: 'center', justifyContent: 'center', marginHorizontal: -8 },
-  artPanelWide: { flex: 1, minWidth: 0, alignSelf: 'stretch', borderRadius: 36, backgroundColor: '#F6F7F9', overflow: 'hidden', minHeight: 590, marginHorizontal: 0 },
-  panel: { width: '100%', paddingBottom: 4 },
-  panelWide: { width: 390 },
-  content: { gap: 16 },
-  title: { fontFamily: font.bold, fontSize: 38, lineHeight: 42, letterSpacing: -1.8 },
-  titleWide: { fontSize: 45, lineHeight: 49, letterSpacing: -2.1 },
+  brand: { fontFamily: font.bold, fontSize: 26, flex: 1, letterSpacing: -1 },
+  progressLabel: { color: color.secondaryInk, fontFamily: font.medium, fontSize: 13 },
+  track: { height: 4, overflow: 'hidden', backgroundColor: color.rule, borderRadius: 4, marginTop: 16 },
+  fill: { height: '100%', backgroundColor: color.ink },
+  content: { gap: 16, paddingTop: 26 },
+  title: { fontFamily: font.bold, fontSize: 36, lineHeight: 41, letterSpacing: -1.6 },
   description: { fontSize: 16, lineHeight: 24, color: color.secondaryInk },
-  error: { color: color.error },
-  actions: { gap: 7, marginTop: 6 },
-  primary: { minHeight: 56 },
+  art: { alignItems: 'center', overflow: 'hidden' },
+  choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  recipe: { flexDirection: 'row', backgroundColor: color.muted, borderRadius: 20, overflow: 'hidden', minHeight: 86 },
+  cover: { width: 86 },
+  recipeCopy: { flex: 1, padding: 12, justifyContent: 'center', gap: 5 },
+  recipeTitle: { fontFamily: font.bold, fontSize: 17 },
+  warning: { color: color.error, fontFamily: font.medium },
 });

@@ -1,8 +1,9 @@
 import type { Diet, Recipe } from './recipes';
 import type { ShareOptions } from './FlowSheets';
 import { requireSupabase, supabase } from './supabase';
+import { allergens, cookingStyles, type Allergen, type Personalization } from './allergens';
 
-export type Account = { id: string; name: string; diet: Diet };
+export type Account = { id: string; name: string; diet: Diet; personalization?: Personalization };
 export type Session = { user: Account | null; recipes: Recipe[] };
 export const accountsConfigured = Boolean(supabase);
 
@@ -33,7 +34,17 @@ export async function readSession(): Promise<Session> {
     cookbook(id),
   ]);
   if (profile.error) throw profile.error;
-  return { user: { id, name: profile.data?.display_name ?? '', diet: profile.data?.diet ?? 'any' }, recipes };
+  const raw = session.user.user_metadata?.to_taste_preferences;
+  const personalization: Personalization | undefined = raw && Array.isArray(raw.allergens)
+    && typeof raw.cooking === 'string' && Object.hasOwn(cookingStyles, raw.cooking)
+    ? { allergens: [...new Set<Allergen>(raw.allergens.filter((item: unknown) => typeof item === 'string' && Object.hasOwn(allergens, item)))], cooking: raw.cooking }
+    : undefined;
+  return { user: { id, name: profile.data?.display_name ?? '', diet: profile.data?.diet ?? 'any', personalization }, recipes };
+}
+
+export async function savePersonalization(preferences: Personalization) {
+  const { error } = await requireSupabase().auth.updateUser({ data: { to_taste_preferences: preferences } });
+  if (error) throw error;
 }
 
 export async function saveProfile(id: string, values: { display_name?: string; diet?: Diet }): Promise<Account> {

@@ -5,15 +5,18 @@ import { Glyph } from './Glyph';
 import { Action, color, Copy, Cover, Favorite, font, Segment, segmentTrack } from './ui';
 import { MotionPressable as Pressable, Scene } from './motion';
 import { dietOptions, lines, matchesDiet, type Diet, type Recipe } from './recipes';
+import { allergenWarnings, warningLabels, type Personalization } from './allergens';
+import { matchesCooking } from './Onboarding';
 
 export type Filter = 'all' | 'favorites';
 type Props = {
   recipes: Recipe[]; filter: Filter; setFilter: (filter: Filter) => void;
   onOpen: (id: string) => void; onFavorite: (id: string) => void; onAdd: () => void;
   explore?: boolean; preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
+  personalization?: Personalization;
 };
 
-export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active }: Props) {
+export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const wide = width >= 850;
   const [query, setQuery] = useState('');
@@ -29,9 +32,12 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
       && (collection !== 'Under 30 min' || (Number(recipe.minutes) > 0 && Number(recipe.minutes) < 30))
       && (collection !== 'One pan' || recipe.discovery?.onePan)
       && (collection !== 'Weekend' || recipe.discovery?.weekend))));
+  const warnings = new Map(visible.map(recipe => [recipe.id, warningLabels(allergenWarnings(recipe.ingredients, personalization?.allergens ?? []))]));
   if (explore) {
     const score = (recipe: Recipe) => preference !== 'any' && recipe.discovery?.diet === preference ? 2 : Number(matchesDiet(recipe, preference));
-    visible.sort((a, b) => score(b) - score(a));
+    visible.sort((a, b) => Number(!!warnings.get(a.id)?.length) - Number(!!warnings.get(b.id)?.length)
+      || score(b) - score(a)
+      || Number(matchesCooking(b, personalization?.cooking)) - Number(matchesCooking(a, personalization?.cooking)));
   }
   const filtered = Boolean(search || collection !== 'All' || strict !== 'any');
   const featured = explore && !filtered ? visible[0] : undefined;
@@ -119,12 +125,13 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
         </View>}
         <Scene trigger={`${search}|${collection}|${strict}|${filter}`}>
           {featured && <View testID="recipe-card" style={[styles.feature, wide && styles.featureWide]}>
-            <Pressable accessibilityRole="button" accessibilityLabel={`View ${featured.title}`} onPress={() => onOpen(featured.id)} style={styles.featureButton}>
+            <Pressable accessibilityRole="button" accessibilityLabel={[`View ${featured.title}`, ...(warnings.get(featured.id) ?? [])].join('. ')} onPress={() => onOpen(featured.id)} style={styles.featureButton}>
               <View style={StyleSheet.absoluteFill}><Cover recipe={featured} /></View>
               <LinearGradient colors={['#08090B16', 'transparent', '#08090BBA']} locations={[0, 0.25, 1]} style={StyleSheet.absoluteFill} />
               <View style={styles.featureBadge}><Copy style={styles.featureBadgeText}>IN THE SPOTLIGHT</Copy></View>
               <View style={[styles.featureCopy, wide && styles.featureCopyWide]}>
                 <Copy accessibilityRole="header" numberOfLines={4} style={[styles.featureTitle, wide && styles.featureTitleWide]}>{featured.title}</Copy>
+                {warnings.get(featured.id)?.map(label => <Copy key={label} style={styles.warningTag}>{label}</Copy>)}
                 <View style={styles.featureFooter}>
                   <Copy style={styles.featureMeta}>{summary(featured)}</Copy>
                   <View style={styles.featureArrow}><Glyph name="forward" color={color.white} size={21} /></View>
@@ -140,11 +147,12 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
             </View>
             <View style={[styles.grid, wide && styles.gridWide]}>
               {rest.map((recipe) => <View testID="recipe-card" key={recipe.id} style={[styles.card, { width: cardWidth }]}>
-                <Pressable accessibilityRole="button" accessibilityLabel={`View ${recipe.title}`} onPress={() => onOpen(recipe.id)} style={styles.cardButton}>
+                <Pressable accessibilityRole="button" accessibilityLabel={[`View ${recipe.title}`, ...(warnings.get(recipe.id) ?? [])].join('. ')} onPress={() => onOpen(recipe.id)} style={styles.cardButton}>
                   <View style={[styles.cardPhoto, { height: columns === 1 ? Math.min(340, cardWidth * 0.85) : cardWidth * 1.05 }]}><Cover recipe={recipe} /></View>
                   <View style={styles.cardCopy}>
                     <Copy style={styles.cardMeta}>{summary(recipe)}</Copy>
                     <Copy style={[styles.cardTitle, wide && styles.cardTitleWide]}>{recipe.title}</Copy>
+                    {warnings.get(recipe.id)?.map(label => <Copy key={label} style={styles.warningTag}>{label}</Copy>)}
                     <Copy style={styles.author}>{recipe.discovery?.author ?? `${lines(recipe.ingredients).length} ingredients`}</Copy>
                   </View>
                 </Pressable>
@@ -177,6 +185,7 @@ function Chip({ label, selected, onPress }: { label: string; selected: boolean; 
 }
 
 const styles = StyleSheet.create({
+  warningTag: { alignSelf: 'flex-start', color: color.error, backgroundColor: '#FFF2EF', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4, fontFamily: font.bold, fontSize: 12 },
   page: { flex: 1 },
   header: { backgroundColor: color.surface },
   headerInner: { minHeight: 76, maxWidth: 1160, paddingHorizontal: 20, width: '100%', alignSelf: 'center', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },

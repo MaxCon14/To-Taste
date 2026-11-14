@@ -9,6 +9,7 @@ import { GlassNav, type Tab } from './GlassNav';
 import { MotionProvider, Scene, WebPolish } from './motion';
 import { Library, type Filter } from './Library';
 import { Onboarding } from './Onboarding';
+import type { Personalization } from './allergens';
 import { RecipeForm, type FormState } from './RecipeForm';
 import { RecipeScreen } from './RecipeScreen';
 import { featuredRecipes, lines, type Diet, type Recipe, type RecipeDraft } from './recipes';
@@ -17,7 +18,7 @@ import type { ShoppingItem } from './shopping';
 import { Action, color, Copy, font } from './ui';
 import { DietSheet, Profile, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
 import { AccountAccess } from './AccountAccess';
-import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readPublications, readSession, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
+import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readPublications, readSession, savePersonalization, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
 import { exchangeAuthCallback, requestAccountDeletion, restoreNativeCallback, signInWithProvider } from './accountAuth';
 import { monitorSession } from './supabase';
 
@@ -135,7 +136,7 @@ function Cookbook() {
       setRecipes(latest.current);
       setDraft(savedDraft);
       setGuestRecipes(data);
-      setOnboarding(!(user && intent));
+      setOnboarding(!user?.personalization);
       setShowDietPrompt(!localDiet && (!user || user.diet === 'any'));
       if (user) {
         setPreference(user.diet);
@@ -319,7 +320,7 @@ function Cookbook() {
   async function saveDiet(diet: Diet) {
     const owner = accountRef.current;
     if (owner && owner.diet !== diet) {
-      const updated = await saveProfile(owner.id, { diet });
+      const updated = { ...owner, ...await saveProfile(owner.id, { diet }) };
       if (accountRef.current?.id !== owner.id) return;
       accountRef.current = updated;
       setAccount(updated);
@@ -330,7 +331,15 @@ function Cookbook() {
     setShowDietPrompt(false);
   }
 
-  async function finishWelcome() {
+  async function finishWelcome(diet: Diet, personalization: Personalization) {
+    const owner = accountRef.current;
+    if (!owner) throw new Error('Sign in to save your preferences.');
+    await saveDiet(diet);
+    await savePersonalization(personalization);
+    if (accountRef.current?.id !== owner.id) return;
+    const updated = { ...accountRef.current, personalization };
+    accountRef.current = updated;
+    setAccount(updated);
     setTab('explore');
     setShowDietPrompt(false);
     setOnboarding(false);
@@ -344,7 +353,7 @@ function Cookbook() {
   }
 
   async function prepareAuth(kind: AuthIntent['kind'] = 'access') {
-    const destination = onboarding ? 'saved' : tab;
+    const destination = onboarding ? 'explore' : tab;
     await AsyncStorage.setItem(intentKey, JSON.stringify({ kind, tab: destination, selected, share, created: Date.now() }));
   }
 
@@ -373,7 +382,7 @@ function Cookbook() {
     setRecipes(session.recipes);
     setGuestRecipes(guest);
     setDraft(userDraft);
-    setOnboarding(false);
+    setOnboarding(!user.personalization);
     setAuth(false);
     setAuthError('');
     setShowSyncOffer(false);
@@ -409,6 +418,7 @@ function Cookbook() {
     accountRef.current = null;
     latest.current = [];
     setAccount(null);
+    setOnboarding(true);
     setRecipes([]);
     setDraft(undefined);
     setSelected(undefined);
@@ -470,16 +480,11 @@ function Cookbook() {
     </> : <ActivityIndicator color={color.secondaryInk} />}
   </View>;
 
-  const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError}
-    onGuest={() => {
-      closeAuth();
-      if (onboarding) void finishWelcome().catch(showError);
-    }} />;
-  if (onboarding) return <>
-    <Onboarding initialDiet={preference} explore={async (diet) => {
-      if (diet !== undefined) await saveDiet(diet);
-      await finishWelcome();
-    }}
+  const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError} />;
+  if (onboarding || !account) return <>
+    <Onboarding key={account?.id ?? 'signup'} accountId={account?.id} initialDiet={preference} initial={account?.personalization} recipes={discoveries}
+      edit={!!account?.personalization} complete={finishWelcome}
+      cancel={account?.personalization ? () => setOnboarding(false) : undefined}
       signIn={accountsConfigured && !account ? () => setAuth(true) : undefined} />
     {notice?.error && <View style={[styles.notice, styles.noticeError]}><Copy accessibilityRole="alert">{notice.text}</Copy></View>}
     {authSheet}
@@ -507,12 +512,14 @@ function Cookbook() {
       <View style={[styles.safe, tab !== 'explore' && styles.inactiveTab]} pointerEvents={tab === 'explore' ? 'auto' : 'none'}
         aria-hidden={tab !== 'explore'} importantForAccessibility={tab === 'explore' ? 'auto' : 'no-hide-descendants'}>
         <Library active={tab === 'explore'} explore recipes={exploreRecipes} filter="all" setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
+          personalization={account.personalization}
           preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)}
           onDismissDiet={showDietPrompt ? () => void saveDiet('any').catch(showError) : undefined} />
       </View>
       <View style={[styles.safe, !libraryActive && styles.inactiveTab]} pointerEvents={libraryActive ? 'auto' : 'none'}
         aria-hidden={!libraryActive} importantForAccessibility={libraryActive ? 'auto' : 'no-hide-descendants'}>
         <Library active={libraryActive} recipes={recipes} filter={filter} setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
+          personalization={account.personalization}
           preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)} />
       </View>
       {tab === 'shopping' && <ShoppingList items={shopping}
@@ -529,6 +536,7 @@ function Cookbook() {
         onSettings={() => setAccountSettings(true)} onReplayWelcome={() => setOnboarding(true)} /></Scene>}
     </SafeAreaView>
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
+      allergens={account.personalization?.allergens}
       onBack={() => setSelected(undefined)} onFavorite={() => favorite(activeRecipe.id)}
       onAddIngredients={(indices) => addIngredients(activeRecipe, indices)}
       onSave={!recipeSaved ? () => saveDiscovery(activeRecipe) : undefined}
@@ -599,7 +607,7 @@ function Cookbook() {
         refreshCommunity();
       }}
       share={async (diet, onePan, weekend, name) => {
-        const publisher = account.name === name ? account : await saveProfile(account.id, { display_name: name });
+        const publisher = account.name === name ? account : { ...account, ...await saveProfile(account.id, { display_name: name }) };
         await publishRecipe(publisher, shareRecipe, { diet, onePan, weekend });
         if (accountRef.current?.id === account.id) {
           accountRef.current = publisher;
