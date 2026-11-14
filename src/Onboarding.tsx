@@ -10,6 +10,9 @@ import { Glyph } from './Glyph';
 import { allergens, cookingStyles, readCookingPreferences, warningLabels, type Allergen, type CookingStyle, type Personalization, type PreferredCookingStyle } from './allergens';
 import { recipeRecommendations } from './recipeRecommendations';
 import { dietOptions, type Diet, type Recipe } from './recipes';
+import { ProfileEditor, ProfileIdentity } from './ProfileEditor';
+import type { Account } from './cookbookApi';
+import type { Cook } from './socialApi';
 
 const allergenIcons: Record<Allergen, string> = {
   gluten: '🌾', crustaceans: '🦐', eggs: '🥚', fish: '🐟', peanuts: '🥜', soy: '🫘',
@@ -67,49 +70,58 @@ export function CookingChoices({ selected, choose }: { selected: PreferredCookin
       }} />)}</View>;
 }
 
-export function Onboarding({ accountId, signIn, recipes, complete }: {
-  accountId?: string; signIn?: () => void; recipes: Recipe[];
+export function Onboarding({ account, signIn, recipes, complete, profileSaved }: {
+  account: Account | null; signIn?: () => void; recipes: Recipe[]; profileSaved: (cook: Cook) => void;
   complete: (diet: Diet, preferences: Personalization) => Promise<void>;
 }) {
-  const [step, setStep] = useState(accountId ? 3 : 1);
-  const [restored, setRestored] = useState(!accountId);
-  const [selected, setSelected] = useState<Allergen[] | null>(null);
-  const [diet, setDiet] = useState<Diet | null>(null);
-  const [cooking, setCooking] = useState<PreferredCookingStyle[] | null>(null);
+  const [step, setStep] = useState(account ? (account.username ? 3 : 2) : 1);
+  const [restored, setRestored] = useState(!account);
+  const [selected, setSelected] = useState<Allergen[] | null>(account?.personalization?.allergens ?? null);
+  const [diet, setDiet] = useState<Diet | null>(account?.personalization ? account.diet : null);
+  const [cooking, setCooking] = useState<PreferredCookingStyle[] | null>(account?.personalization?.cooking ?? null);
+  const [resumeAfterProfile, setResumeAfterProfile] = useState(4);
+  const [profileBusy, setProfileBusy] = useState(false);
   const { busy, error, run } = useSubmission();
-  const draftKey = accountId ? `to-taste.onboarding.${accountId}` : undefined;
+  const draftKey = account ? `to-taste.onboarding.${account.id}` : undefined;
   useEffect(() => {
     if (!draftKey) return;
     let active = true;
     void AsyncStorage.getItem(draftKey).then(value => {
       if (!active || !value) return;
       const draft = JSON.parse(value);
-      setSelected(draft.selected);
-      setDiet(draft.diet);
+      if (Array.isArray(draft.selected)) setSelected(draft.selected);
+      if (typeof draft.diet === 'string' && Object.hasOwn(dietOptions, draft.diet)) setDiet(draft.diet);
       const restoredCooking = readCookingPreferences(draft.cooking);
-      setCooking(restoredCooking);
-      const lastStep = draft.version !== 2 && draft.step === 5 ? 6 : draft.step;
-      setStep(lastStep === 6 && restoredCooking === null ? 5 : lastStep);
+      if (restoredCooking !== null) setCooking(restoredCooking);
+      if (draft.version === 3) {
+        if (Number.isInteger(draft.step) && draft.step >= 2 && draft.step <= 7) setStep(draft.step);
+        if (Number.isInteger(draft.resumeAfterProfile) && draft.resumeAfterProfile >= 4 && draft.resumeAfterProfile <= 7) {
+          setResumeAfterProfile(draft.resumeAfterProfile);
+        }
+      } else if (Number.isInteger(draft.step) && draft.step >= 3 && draft.step <= 6) {
+        const lastStep = draft.version !== 2 && draft.step === 5 && restoredCooking !== null ? 6 : draft.step;
+        setResumeAfterProfile(Math.min(lastStep + 1, restoredCooking === null ? 6 : 7));
+      }
     }).catch(() => {}).finally(() => { if (active) setRestored(true); });
     return () => { active = false; };
   }, [draftKey]);
   useEffect(() => {
-    if (draftKey && restored) void AsyncStorage.setItem(draftKey, JSON.stringify({ version: 2, step, selected, diet, cooking })).catch(() => {});
-  }, [draftKey, restored, step, selected, diet, cooking]);
-  const visibleStep = accountId ? Math.max(3, step) : 1;
-  const progress = visibleStep === 1 ? 1 : visibleStep - 1;
-  const recommendations = visibleStep === 6
+    if (draftKey && restored) void AsyncStorage.setItem(draftKey, JSON.stringify({ version: 3, step, selected, diet, cooking, resumeAfterProfile })).catch(() => {});
+  }, [draftKey, restored, step, selected, diet, cooking, resumeAfterProfile]);
+  const visibleStep = account ? (account.username ? Math.max(2, step) : 2) : 1;
+  const recommendations = visibleStep === 7
     ? recipeRecommendations(recipes, diet ?? 'any', { allergens: selected ?? [], cooking: cooking ?? [] }).slice(0, 3)
     : [];
 
   return <SafeAreaView style={styles.screen}>
-    <ScrollView key={visibleStep} contentContainerStyle={styles.scroll}>
+    <ScrollView key={visibleStep} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets contentContainerStyle={styles.scroll}>
       <View style={styles.header}>
         <Image source={require('../assets/icon.png')} style={styles.mark} />
         <Copy style={styles.brand}>To Taste</Copy>
-        <Copy style={styles.progressLabel}>{progress} / 5</Copy>
+        <Copy style={styles.progressLabel}>{visibleStep} / 7</Copy>
       </View>
-      <View style={styles.track}><View style={[styles.fill, { width: `${progress * 20}%` }]} /></View>
+      <View aria-hidden style={styles.track}>{Array.from({ length: 7 }, (_, index) => <View key={index}
+        style={[styles.progressSegment, index < visibleStep && styles.progressActive]} />)}</View>
       <Scene key={visibleStep} style={styles.content}>
         {visibleStep === 1 && <>
           <View style={styles.art}><OnboardingArtwork scene="cookbook" size={290} /></View>
@@ -117,27 +129,39 @@ export function Onboarding({ accountId, signIn, recipes, complete }: {
           <Copy style={styles.description}>Save the recipes you love and discover meals that suit the way you eat.</Copy>
           {signIn ? <Action label="Get started" onPress={signIn} /> : <Copy>Accounts are unavailable in this build.</Copy>}
         </>}
-        {visibleStep === 3 && restored && <>
+        {visibleStep === 2 && account && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>Meet the cook.</Copy>
+          <Copy style={styles.description}>Pick a name and username people can find you by.</Copy>
+          <ProfileIdentity userId={account.id} initialName={account.name} initialHandle={account.username}
+            saved={cook => { profileSaved(cook); setStep(3); }} />
+        </>}
+        {visibleStep === 3 && account && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>Make it yours.</Copy>
+          <Copy style={styles.description}>Give your public profile a little personality. Add a photo, choose a banner, or tell us what you love to cook.</Copy>
+          <ProfileEditor userId={account.id} onboarding onBusy={setProfileBusy}
+            saved={cook => { profileSaved(cook); setStep(resumeAfterProfile); }} />
+        </>}
+        {visibleStep === 4 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you need to avoid?</Copy>
           <Copy style={styles.description}>Select all that apply, or choose None. We’ll flag matching ingredients. Always check product labels.</Copy>
           <AllergenChoices selected={selected} choose={setSelected} />
-          <Action label="Continue" disabled={selected === null} onPress={() => setStep(4)} />
+          <Action label="Continue" disabled={selected === null} onPress={() => setStep(5)} />
         </>}
-        {visibleStep === 4 && restored && <>
+        {visibleStep === 5 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>How do you usually eat?</Copy>
           <Copy style={styles.description}>Choose one diet preference to see more recipes that suit you.</Copy>
           <DietPreferenceChoices selected={diet} choose={setDiet} />
-          <Action label="Continue" disabled={diet === null} onPress={() => setStep(5)} />
+          <Action label="Continue" disabled={diet === null} onPress={() => setStep(6)} />
         </>}
-        {visibleStep === 5 && restored && <>
+        {visibleStep === 6 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you like to cook?</Copy>
           <Copy style={styles.description}>Select all the meals you’d like to see more often, or choose No preference.</Copy>
           <CookingChoices selected={cooking} choose={setCooking} />
-          <Action label="See your recommendations" disabled={cooking === null} onPress={() => setStep(6)} />
+          <Action label="See your recommendations" disabled={cooking === null} onPress={() => setStep(7)} />
         </>}
-        {visibleStep === 6 && restored && <>
-          <Copy accessibilityRole="header" style={styles.title}>Your first recipes.</Copy>
-          <Copy style={styles.description}>A few ideas to get you cooking. Check the full ingredient list before you start.</Copy>
+        {visibleStep === 7 && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>What’s cooking?</Copy>
+          <Copy style={styles.description}>A few picks to start your To Taste collection. Check the full ingredient list before you cook.</Copy>
           {recommendations.map(({ recipe, warnings }) => <View style={styles.recipe} key={recipe.id}>
             <View style={styles.cover}><Cover recipe={recipe} /></View>
             <View style={styles.recipeCopy}><Copy style={styles.recipeTitle}>{recipe.title}</Copy>
@@ -153,7 +177,7 @@ export function Onboarding({ accountId, signIn, recipes, complete }: {
         </>}
         {error ? <Copy accessibilityRole="alert" style={styles.warning}>{error}</Copy> : null}
         {!restored && <Copy accessibilityLiveRegion="polite">Opening your preferences…</Copy>}
-        {visibleStep > 3 && <Action secondary label="Back" disabled={busy} onPress={() => setStep(visibleStep - 1)} />}
+        {visibleStep > 2 && restored && <Action secondary label="Back" disabled={busy || profileBusy} onPress={() => setStep(visibleStep - 1)} />}
       </Scene>
     </ScrollView>
   </SafeAreaView>;
@@ -166,8 +190,9 @@ const styles = StyleSheet.create({
   mark: { width: 36, height: 36, borderRadius: 11 },
   brand: { fontFamily: font.bold, fontSize: 26, flex: 1, letterSpacing: -1 },
   progressLabel: { color: color.secondaryInk, fontFamily: font.medium, fontSize: 13 },
-  track: { height: 4, overflow: 'hidden', backgroundColor: color.rule, borderRadius: 4, marginTop: 16 },
-  fill: { height: '100%', backgroundColor: color.ink },
+  track: { flexDirection: 'row', gap: 4, marginTop: 16 },
+  progressSegment: { flex: 1, height: 4, borderRadius: 4, backgroundColor: color.rule },
+  progressActive: { backgroundColor: color.ink },
   content: { gap: 16, paddingTop: 26 },
   title: { fontFamily: font.bold, fontSize: 36, lineHeight: 41, letterSpacing: -1.6 },
   description: { fontSize: 16, lineHeight: 24, color: color.secondaryInk },

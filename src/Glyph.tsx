@@ -3,6 +3,7 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import ArrowRight from 'lucide-react-native/icons/arrow-right';
 import ArrowUpRight from 'lucide-react-native/icons/arrow-up-right';
 import BookOpen from 'lucide-react-native/icons/book-open';
+import Bookmark from 'lucide-react-native/icons/bookmark';
 import Check from 'lucide-react-native/icons/check';
 import Compass from 'lucide-react-native/icons/compass';
 import UserRound from 'lucide-react-native/icons/user-round';
@@ -35,6 +36,8 @@ const symbols = {
   feedback: ['bubble.left', MessageSquare],
   allergens: ['shield', Shield],
   book: ['book', BookOpen],
+  bookmark: ['bookmark', Bookmark],
+  'bookmark-filled': ['bookmark.fill', Bookmark],
   check: ['checkmark', Check],
   explore: ['safari', Compass],
   profile: ['person.crop.circle', UserRound],
@@ -62,5 +65,5 @@ export function Glyph({ name, color, size = 18 }: { name: keyof typeof symbols; 
   const [symbol, Icon] = symbols[name];
   return Platform.OS === 'ios'
     ? <SymbolView accessible={false} name={symbol} tintColor={color} weight="medium" size={size} />
-    : <Icon accessible={false} color={color} size={size} strokeWidth={1.65} fill={name === 'heart-filled' || name === 'star-filled' ? color : 'none'} />;
+    : <Icon accessible={false} color={color} size={size} strokeWidth={1.65} fill={name === 'heart-filled' || name === 'star-filled' || name === 'bookmark-filled' ? color : 'none'} />;
 }

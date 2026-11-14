@@ -7,6 +7,8 @@ import { MotionPressable } from './motion';
 import { featuredRecipes, type Recipe } from './recipes';
 import { saveBook, searchBooks, searchCooks, type Cook, type RecipeBook } from './socialApi';
 import { Action, color, Copy, Cover, font } from './ui';
+import { ProfileAvatar } from './ProfileEditor';
+import { profileImageUrl } from './profilePhotos';
 
 export function ExploreResults({ query, openRecipe, openBook, openCook }: {
   query: string; openRecipe: (recipe: Recipe) => void; openBook: (book: RecipeBook) => void; openCook: (cook: Cook) => void;
@@ -43,7 +45,7 @@ export function ExploreResults({ query, openRecipe, openBook, openCook }: {
     {!!result.cooks.length && <View style={styles.group}>
       <Copy accessibilityRole="header" style={styles.heading}>People</Copy>
       {result.cooks.map(cook => <MotionPressable key={cook.user_id} accessibilityRole="button" onPress={() => openCook(cook)} style={styles.row}>
-        <View style={styles.icon}><Glyph name="profile" color={color.ink} size={21} /></View>
+        <ProfileAvatar name={cook.name} uri={profileImageUrl(cook.avatar_image)} size={40} />
         <View style={styles.text}><Copy style={styles.name}>{cook.name}</Copy><Copy style={styles.secondary}>@{cook.handle}</Copy></View>
         <Glyph name="forward" color={color.secondaryInk} size={16} />
       </MotionPressable>)}

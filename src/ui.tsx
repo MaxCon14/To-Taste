@@ -47,9 +47,9 @@ export function IconButton({ label, children, selected, glass, ...props }: Press
   </Pressable>;
 }
 
-export function Favorite({ favorite, onPress, glass }: { favorite: boolean; onPress: () => void; glass?: boolean }) {
-  return <IconButton label={favorite ? 'Remove from favorites' : 'Add to favorites'} selected={favorite} glass={glass} onPress={onPress}>
-    <Glyph name={favorite ? 'heart-filled' : 'heart'} color={glass ? color.white : color.ink} size={19} />
+export function SaveRecipeButton({ saved, onPress, glass }: { saved: boolean; onPress: () => void; glass?: boolean }) {
+  return <IconButton label={saved ? 'Manage saved recipe' : 'Save recipe'} selected={saved} glass={glass} onPress={onPress}>
+    <Glyph name={saved ? 'bookmark-filled' : 'bookmark'} color={glass ? color.white : color.ink} size={19} />
   </IconButton>;
 }
 

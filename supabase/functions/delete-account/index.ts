@@ -45,6 +45,17 @@ Deno.serve(async request => {
   const { data: { user }, error: authError } = await admin.auth.getUser(token);
   if (authError || !user) return reply({ error: 'Sign in again before deleting your account.' }, 401);
 
+  const images = admin.storage.from('cook-profile-images');
+  for (;;) {
+    const { data: files, error: listError } = await images.list(user.id, { limit: 100 });
+    if (listError) return reply({ error: 'We couldn’t remove your profile photos. Try again.' }, 500);
+    if (!files.length) break;
+    const { error: removeError } = await images.remove(files.map(file => `${user.id}/${file.name}`));
+    if (removeError) return reply({ error: 'We couldn’t remove your profile photos. Try again.' }, 500);
+    if (files.length < 100) break;
+  }
+
+
   const appleIds = (user.identities ?? []).filter(identity => identity.provider === 'apple').map(identity => identity.id);
   const body = await request.json().catch(() => ({}));
   const revoked = appleIds.length && typeof body?.appleCode === 'string'

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Glyph } from './Glyph';
-import { Action, color, Copy, Cover, Favorite, font, Segment, segmentTrack } from './ui';
+import { Action, color, Copy, Cover, SaveRecipeButton, font, Segment, segmentTrack } from './ui';
 import { MotionPressable as Pressable, Scene } from './motion';
 import { dietOptions, lines, matchesDiet, type Diet, type Recipe } from './recipes';
 import { warningLabels, type Personalization } from './allergens';
@@ -10,18 +10,16 @@ import { recipeRecommendations } from './recipeRecommendations';
 import { ExploreResults } from './RecipeBooks';
 import type { Cook, RecipeBook } from './socialApi';
 
-export type Filter = 'all' | 'favorites';
 type Props = {
-  recipes: Recipe[]; filter: Filter; setFilter: (filter: Filter) => void;
-  onOpen: (id: string) => void; onFavorite: (id: string) => void; onAdd: () => void;
-  explore?: boolean; preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
+  recipes: Recipe[]; savedIds: ReadonlySet<string>;
+  onOpen: (id: string) => void; onSave: (recipe: Recipe) => void;
+  preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
   personalization?: Personalization;
-  savedOnly?: boolean;
-  social?: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; loading: boolean; failed: boolean; retry: () => void;
+  social: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; loading: boolean; failed: boolean; retry: () => void;
     openRecipe: (recipe: Recipe) => void; openBook: (book: RecipeBook) => void; openCook: (cook: Cook) => void };
 };
 
-export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd, explore = false, preference, onDiet, onDismissDiet, active, personalization, social, savedOnly = false }: Props) {
+export function Library({ recipes, savedIds, onOpen, onSave, preference, onDiet, onDismissDiet, active, personalization, social }: Props) {
   const { width, fontScale } = useWindowDimensions();
   const wide = width >= 850;
   const [query, setQuery] = useState('');
@@ -32,19 +30,17 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
   const [showFilters, setShowFilters] = useState(false);
   const activeFilters = Number(collection !== 'All') + Number(strict !== 'any');
   const search = query.trim().toLowerCase();
-  const globalSearch = !!social && !!search;
-  const matching = recipes.filter((recipe) => (explore || filter === 'all' || recipe.favorite)
-    && (!search || `${recipe.title}\n${recipe.ingredients}`.toLowerCase().includes(search))
-    && (!explore || (matchesDiet(recipe, strict)
+  const globalSearch = Boolean(search);
+  const matching = recipes.filter((recipe) => matchesDiet(recipe, strict)
       && (collection !== 'Under 30 min' || (Number(recipe.minutes) > 0 && Number(recipe.minutes) < 30))
       && (collection !== 'One pan' || recipe.discovery?.onePan)
-      && (collection !== 'Weekend' || recipe.discovery?.weekend))));
-  const following = social?.feed === 'following';
-  const entries = recipeRecommendations(matching, preference, personalization, explore && !following);
+      && (collection !== 'Weekend' || recipe.discovery?.weekend));
+  const following = social.feed === 'following';
+  const entries = recipeRecommendations(matching, preference, personalization, !following);
   const visible = entries.map(({ recipe }) => recipe);
   const warnings = new Map(entries.map(({ recipe, warnings }) => [recipe.id, warningLabels(warnings)]));
   const filtered = Boolean(search || collection !== 'All' || strict !== 'any');
-  const featured = explore && !filtered && !following ? visible[0] : undefined;
+  const featured = !filtered && !following ? visible[0] : undefined;
   const rest = featured ? visible.slice(1) : visible;
   const gridWidth = Math.min(width - 40, 1120);
   const readableWidth = width / fontScale;
@@ -58,54 +54,50 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           <View style={styles.brandMark}><Glyph name="ingredients" color={color.white} size={17} /></View>
           <Copy style={styles.brandName}>To Taste</Copy>
         </View>
-        {explore && <Pressable accessibilityRole="button" accessibilityLabel="Preferences" onPress={onDiet} style={styles.preference}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Preferences" onPress={onDiet} style={styles.preference}>
           <Copy style={styles.preferenceLabel}>{preference === 'any' ? 'Made for you' : dietOptions[preference]}</Copy>
           <View style={styles.preferenceIcon}><Glyph name="preferences" size={17} color={color.ink} /></View>
-        </Pressable>}
+        </Pressable>
       </View>
     </View>
     <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
       <View style={styles.content}>
         <View style={[styles.intro, wide && styles.introWide]}>
           <View style={styles.introText}>
-            <Copy accessibilityRole="header" style={[styles.heading, wide && styles.headingWide]}>{following ? 'Following' : explore ? 'Explore' : savedOnly ? 'Saved' : 'Your recipes'}</Copy>
-            <Copy style={styles.subtitle}>{following ? 'New recipes from cooks you follow.' : explore ? 'A little inspiration. Something delicious.' : 'Good food, worth keeping.'}</Copy>
+            <Copy accessibilityRole="header" style={[styles.heading, wide && styles.headingWide]}>{following ? 'Following' : 'Explore'}</Copy>
+            <Copy style={styles.subtitle}>{following ? 'New recipes from cooks you follow.' : 'A little inspiration. Something delicious.'}</Copy>
           </View>
-          {wide && <Copy style={styles.edition}>{explore ? 'THE EVERYDAY COLLECTION' : 'YOUR PERSONAL COLLECTION'}</Copy>}
+          {wide && <Copy style={styles.edition}>THE EVERYDAY COLLECTION</Copy>}
         </View>
         <View style={styles.toolbar}>
-          {social && <View style={styles.socialControls}>
+          <View style={styles.socialControls}>
             <View style={[segmentTrack, styles.feedTabs]}>
               <Segment label="For you" active={!following} onPress={() => social.setFeed('explore')} />
               <Segment label="Following" active={following} onPress={() => social.setFeed('following')} />
             </View>
-          </View>}
+          </View>
           <View style={styles.searchRow}>
           <View testID="recipe-search" style={[styles.search, searchFocused && styles.searchFocused]}>
             <Glyph name="search" size={19} color={searchFocused ? color.ink : color.soft} />
             <TextInput ref={searchInput} value={query} onChangeText={setQuery} autoCapitalize="none" autoCorrect={false}
-              accessibilityLabel={social ? 'Search recipes, books, and people' : 'Search recipes'}
+              accessibilityLabel="Search recipes, books, and people"
               onFocus={() => setSearchFocused(true)} onBlur={() => setSearchFocused(false)}
               selectionColor={color.secondaryInk} cursorColor={color.ink} selectionHandleColor={color.secondaryInk}
-              placeholder={social ? 'Recipes, books, and people' : 'Search recipes'} placeholderTextColor={color.soft} style={styles.searchInput} />
+              placeholder="Recipes, books, and people" placeholderTextColor={color.soft} style={styles.searchInput} />
             {!!query && <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}>
               <Glyph name="close" size={16} color={color.soft} />
             </Pressable>}
           </View>
-          {explore && !globalSearch && <Pressable accessibilityRole="button" accessibilityLabel={activeFilters ? `Filters, ${activeFilters} active` : 'Filters'}
+          {!globalSearch && <Pressable accessibilityRole="button" accessibilityLabel={activeFilters ? `Filters, ${activeFilters} active` : 'Filters'}
             accessibilityState={{ expanded: showFilters }} aria-expanded={showFilters} onPress={() => setShowFilters(!showFilters)}
             style={[styles.filterToggle, (showFilters || activeFilters > 0) && styles.chipSelected]}>
             <Glyph name="preferences" size={20} color={showFilters || activeFilters ? color.white : color.ink} />
             {wide && <Copy style={[styles.filterToggleLabel, (showFilters || activeFilters > 0) && styles.chipSelectedText]}>Filters{activeFilters ? ` · ${activeFilters}` : ''}</Copy>}
           </Pressable>}
           </View>
-          {!explore && <View style={[segmentTrack, wide && styles.wideTabs]}>
-            <Segment label={savedOnly ? 'All saved' : 'My recipes'} active={filter === 'all'} onPress={() => setFilter('all')} />
-            <Segment label="Favorites" active={filter === 'favorites'} onPress={() => setFilter('favorites')} />
-          </View>}
         </View>
         {globalSearch ? <ExploreResults key={search} query={search} openRecipe={social.openRecipe} openBook={social.openBook} openCook={social.openCook} /> : <>
-        {explore && showFilters && <Scene style={styles.filterPanel}>
+        {showFilters && <Scene style={styles.filterPanel}>
           <View style={styles.filterHeading}>
             <Copy accessibilityRole="header" style={styles.filterTitle}>Find your kind of recipe</Copy>
             {activeFilters > 0 && <Pressable accessibilityRole="button" accessibilityLabel="Reset filters" onPress={() => { setCollection('All'); setStrict('any'); }} style={styles.resetFilters}><Copy style={styles.resetLabel}>Reset</Copy></Pressable>}
@@ -122,11 +114,11 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
           </View>
           <Action label={`Show ${visible.length} ${visible.length === 1 ? 'recipe' : 'recipes'}`} onPress={() => setShowFilters(false)} />
         </Scene>}
-        {explore && !showFilters && activeFilters > 0 && <View style={styles.filterSummary}>
+        {!showFilters && activeFilters > 0 && <View style={styles.filterSummary}>
           <Copy style={styles.filterSummaryText}>{[collection !== 'All' ? collection : '', strict !== 'any' ? dietOptions[strict] : ''].filter(Boolean).join(' · ')}</Copy>
           <Pressable accessibilityRole="button" accessibilityLabel="Reset filters" onPress={() => { setCollection('All'); setStrict('any'); }} style={styles.resetFilters}><Copy style={styles.resetLabel}>Reset</Copy></Pressable>
         </View>}
-        {explore && onDismissDiet && !filtered && <View style={styles.personalize}>
+        {onDismissDiet && !filtered && <View style={styles.personalize}>
           <Copy accessibilityRole="header" style={styles.filterTitle}>What do you like to cook?</Copy>
           <Copy style={styles.subtitle}>Choose a diet preference to get recipe suggestions.</Copy>
           <View style={styles.personalizeActions}>
@@ -134,7 +126,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
             <Action secondary label="Skip" onPress={onDismissDiet} />
           </View>
         </View>}
-        <Scene trigger={`${search}|${collection}|${strict}|${filter}`}>
+        <Scene trigger={`${search}|${collection}|${strict}`}>
           {featured && <View testID="recipe-card" style={[styles.feature, wide && styles.featureWide]}>
             <Pressable accessibilityRole="button" accessibilityLabel={[`View ${featured.title}`, ...(warnings.get(featured.id) ?? [])].join('. ')} onPress={() => onOpen(featured.id)} style={styles.featureButton}>
               <View style={StyleSheet.absoluteFill}><Cover recipe={featured} /></View>
@@ -149,11 +141,11 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
                 </View>
               </View>
             </Pressable>
-            <View style={styles.featureHeart}><Favorite glass favorite={featured.favorite} onPress={() => onFavorite(featured.id)} /></View>
+            <View style={styles.featureSave}><SaveRecipeButton glass saved={savedIds.has(featured.id)} onPress={() => onSave(featured)} /></View>
           </View>}
           {!!rest.length && <>
             <View style={styles.listHeader}>
-              <Copy accessibilityRole="header" style={styles.listTitle}>{filtered ? 'Your matches' : following ? 'Latest recipes' : explore ? 'Find your next favorite' : filter === 'favorites' ? 'Your favorites' : 'All recipes'}</Copy>
+              <Copy accessibilityRole="header" style={styles.listTitle}>{filtered ? 'Your matches' : following ? 'Latest recipes' : 'Find your next favorite'}</Copy>
               <Copy style={styles.caption}>{rest.length} {rest.length === 1 ? 'recipe' : 'recipes'}</Copy>
             </View>
             <View style={[styles.grid, wide && styles.gridWide]}>
@@ -167,7 +159,7 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
                     <Copy style={styles.author}>{recipe.discovery?.author ?? `${lines(recipe.ingredients).length} ingredients`}</Copy>
                   </View>
                 </Pressable>
-                <View style={styles.cardHeart}><Favorite glass favorite={recipe.favorite} onPress={() => onFavorite(recipe.id)} /></View>
+                <View style={styles.cardSave}><SaveRecipeButton glass saved={savedIds.has(recipe.id)} onPress={() => onSave(recipe)} /></View>
               </View>)}
             </View>
           </>}
@@ -179,11 +171,10 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
             <Action label="Search for people" onPress={() => searchInput.current?.focus()} />
           </View>}
           {!visible.length && (!following || (filtered && !social.loading && !social.failed)) && <View style={styles.empty}>
-            <View style={styles.emptyIcon}><Glyph name={filter === 'favorites' && !search ? 'heart' : 'book'} size={28} color={color.ink} /></View>
-            <Copy style={styles.listTitle}>{search || explore ? 'Nothing here just yet' : filter === 'favorites' ? 'Keep your favorites close' : savedOnly ? 'No saved recipes yet' : 'A home for your recipes'}</Copy>
-            <Copy style={styles.emptyCopy}>{search || explore ? 'Try another ingredient or adjust your filters.' : filter === 'favorites' ? 'Tap the heart on any recipe. Find it here whenever you need it.' : savedOnly ? 'Save a recipe from Explore to find it here.' : 'Start with a family favorite or a recipe you found online.'}</Copy>
-            {explore && <Action secondary label="Clear filters" onPress={() => { setQuery(''); setCollection('All'); setStrict('any'); }} />}
-            {!explore && !savedOnly && filter === 'all' && !search && <Action label="Add your first recipe" onPress={onAdd}><Glyph name="plus" color={color.white} /></Action>}
+            <View style={styles.emptyIcon}><Glyph name="book" size={28} color={color.ink} /></View>
+            <Copy style={styles.listTitle}>Nothing here just yet</Copy>
+            <Copy style={styles.emptyCopy}>Try adjusting your filters.</Copy>
+            <Action secondary label="Clear filters" onPress={() => { setQuery(''); setCollection('All'); setStrict('any'); }} />
           </View>}
         </Scene>
         {!!visible.length && <View style={styles.endnote}><View style={styles.endLine} /><Glyph name="ingredients" color={color.soft} size={15} /><View style={styles.endLine} /></View>}
@@ -250,7 +241,6 @@ const styles = StyleSheet.create({
   resetLabel: { color: color.secondaryInk, fontFamily: font.medium, fontSize: 12 },
   filterSummary: { marginTop: -16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   filterSummaryText: { flex: 1, fontSize: 12, color: color.soft },
-  wideTabs: { width: 270 },
   feature: { height: 358, borderRadius: 26, overflow: 'hidden', backgroundColor: color.fill },
   featureWide: { height: 430, borderRadius: 30 },
   featureButton: { flex: 1, justifyContent: 'space-between', padding: 23 },
@@ -262,7 +252,7 @@ const styles = StyleSheet.create({
   featureTitleWide: { fontSize: 46, lineHeight: 50, letterSpacing: -1.8, maxWidth: 560 },
   featureFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
   featureMeta: { flexShrink: 1, minWidth: 0, color: color.white, fontSize: 13, fontFamily: font.medium },
-  featureHeart: { position: 'absolute', top: 15, right: 15 },
+  featureSave: { position: 'absolute', top: 15, right: 15 },
   featureArrow: { flexShrink: 0, width: 42, height: 42, borderRadius: 23, backgroundColor: '#FFFFFF20', borderWidth: 1, borderColor: '#FFFFFF66', alignItems: 'center', justifyContent: 'center' },
   listHeader: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'baseline', justifyContent: 'space-between', paddingTop: 30, paddingBottom: 18 },
   listTitle: { fontFamily: font.bold, fontSize: 21, lineHeight: 28, letterSpacing: -0.5, flexShrink: 1 },
@@ -276,7 +266,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontFamily: font.bold, fontSize: 17, lineHeight: 22, letterSpacing: -0.4 },
   cardTitleWide: { fontSize: 20, lineHeight: 25 },
   author: { fontSize: 11, color: color.soft, marginTop: 3 },
-  cardHeart: { position: 'absolute', top: 10, right: 10 },
+  cardSave: { position: 'absolute', top: 10, right: 10 },
   empty: { alignItems: 'center', borderRadius: 28, backgroundColor: color.muted, paddingHorizontal: 28, paddingVertical: 50, gap: 15, marginTop: 10 },
   emptyIcon: { width: 68, height: 68, borderRadius: 24, backgroundColor: color.white, alignItems: 'center', justifyContent: 'center', marginBottom: 7 },
   emptyCopy: { color: color.soft, fontSize: 14, lineHeight: 22, textAlign: 'center', maxWidth: 300, marginBottom: 8 },

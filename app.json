@@ -20,7 +20,12 @@
     "plugins": [
       "expo-secure-store",
       "expo-apple-authentication",
-      "expo-web-browser"
+      "expo-web-browser",
+      ["expo-image-picker", {
+        "photosPermission": "Choose a photo for your To Taste profile.",
+        "cameraPermission": false,
+        "microphonePermission": false
+      }]
     ]
   }
 }

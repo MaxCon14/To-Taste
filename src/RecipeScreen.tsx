@@ -11,10 +11,10 @@ import { dietOptions, lines, type Recipe } from './recipes';
 import { allergenWarnings, allergens as allergenNames, warningLabels, type Allergen } from './allergens';
 import { RecipeReviews } from './RecipeReviews';
 import { reviewTarget } from './reviewApi';
-import { Action, color, Copy, Cover, Favorite, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
+import { Action, color, Copy, Cover, SaveRecipeButton, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
 
-export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients, onAuthor, allergens = [], reviewerId }: {
-  recipe: Recipe; onBack: () => void; onEdit?: () => void; onFavorite: () => void; onShare?: () => void; onSave?: () => void; onRemove?: () => void;
+export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, onAddIngredients, onAuthor, allergens = [], reviewerId }: {
+  recipe: Recipe; onBack: () => void; onEdit?: () => void; saved: boolean; onSave: () => void; onShare?: () => void;
   onAddIngredients: (indices: number[]) => Promise<void>;
   allergens?: Allergen[];
   reviewerId?: string;
@@ -71,7 +71,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
               {onEdit && <IconButton label="Edit" glass={hasPhoto} onPress={onEdit}>
                 <Glyph name="edit" color={hasPhoto ? color.white : color.ink} size={18} />
               </IconButton>}
-              <Favorite glass={hasPhoto} favorite={recipe.favorite} onPress={onFavorite} />
+              <SaveRecipeButton glass={hasPhoto} saved={saved} onPress={onSave} />
             </View>
           </View>
           <View style={[styles.heroCopy, wide && styles.heroCopyWide]}>
@@ -102,7 +102,6 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
             })}</View> : <Copy style={styles.allergenHelp}>No allergens flagged in the listed ingredients.</Copy>}
             <Copy style={styles.allergenHelp}>Based on ingredient text. Check product labels and possible cross-contact.</Copy>
           </View>
-          {onSave && <Action secondary label="Save to recipe book" onPress={onSave}><Glyph name="book" color={color.ink} /></Action>}
           <View style={[segmentTrack, wide && styles.tabsWide]}>
             <Segment label="Ingredients" active={showingIngredients} onPress={() => setSection('ingredients')} />
             <Segment label="Directions" active={!showingIngredients} onPress={() => setSection('directions')} />
@@ -134,7 +133,6 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
           {sourceError && <Copy accessibilityRole="alert" style={styles.sourceText}>Couldn’t open the original recipe.</Copy>}
           {onShare && <Action secondary label="Share with the community" onPress={onShare}><Glyph name="share" color={color.ink} /></Action>}
           {reviewerId && reviewTarget(recipe.id) && <RecipeReviews recipeId={recipe.id} userId={reviewerId} />}
-          {onRemove && <Action secondary label="Remove from recipe book" onPress={onRemove} />}
         </View>
       </View>
     </ScrollView>

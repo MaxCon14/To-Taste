@@ -32,7 +32,7 @@ export async function readSession(): Promise<Session> {
   const [profile, recipes, cook] = await Promise.all([
     supabase.from('profiles').select('display_name,diet').eq('user_id', id).maybeSingle(),
     cookbook(id),
-    supabase.from('cook_profiles').select('handle').eq('user_id', id).maybeSingle(),
+    supabase.from('cook_profiles').select('handle,name').eq('user_id', id).maybeSingle(),
   ]);
   if (profile.error) throw profile.error;
   if (cook.error) throw cook.error;
@@ -42,7 +42,9 @@ export async function readSession(): Promise<Session> {
     && cooking !== null
     ? { allergens: [...new Set<Allergen>(raw.allergens.filter((item: unknown) => typeof item === 'string' && Object.hasOwn(allergens, item)))], cooking }
     : undefined;
-  return { user: { id, name: profile.data?.display_name ?? '', diet: profile.data?.diet ?? 'any', personalization, username: cook.data?.handle }, recipes };
+  const providerName = session.user.user_metadata?.full_name ?? session.user.user_metadata?.name;
+  const name = cook.data?.name || profile.data?.display_name || (typeof providerName === 'string' ? providerName.slice(0, 60) : '');
+  return { user: { id, name, diet: profile.data?.diet ?? 'any', personalization, username: cook.data?.handle }, recipes };
 }
 
 export async function savePersonalization(preferences: Personalization) {

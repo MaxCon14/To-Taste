@@ -7,9 +7,12 @@ import { useFonts } from 'expo-font';
 import * as Linking from 'expo-linking';
 import { GlassNav, type Tab } from './GlassNav';
 import { MotionProvider, Scene, WebPolish } from './motion';
-import { Library, type Filter } from './Library';
+import { Library } from './Library';
+import { EditCollection, SavedCollections, SaveToCollections } from './SavedCollections';
+import { changeRecipeCollections, deleteCollection, importLegacySaves, readCollections, saveCollection, type NewCollection, type SavedCollection } from './collectionApi';
 import { Onboarding } from './Onboarding';
-import { CookProfile, EditCook } from './CookProfiles';
+import { CookProfile } from './CookProfiles';
+import { ProfileEditor } from './ProfileEditor';
 import { BookSheet, CreateBook } from './RecipeBooks';
 import type { Cook, CookLookup, RecipeBook } from './socialApi';
 import { cookingStyles, type Personalization } from './allergens';
@@ -72,7 +75,12 @@ function Cookbook() {
   const [showDietPrompt, setShowDietPrompt] = useState(false);
   const [dietSheet, setDietSheet] = useState(false);
   const [tab, setTab] = useState<Tab>('explore');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [collections, setCollections] = useState<SavedCollection[]>();
+  const [collectionsFailed, setCollectionsFailed] = useState(false);
+  const collectionLoad = useRef(0);
+  const [collectionId, setCollectionId] = useState<string>();
+  const [collectionEditor, setCollectionEditor] = useState<{ collection?: SavedCollection }>();
+  const [collectionRecipe, setCollectionRecipe] = useState<Recipe>();
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
   const latestShopping = useRef<ShoppingItem[]>([]);
   const shoppingWrites = useRef(Promise.resolve());
@@ -94,7 +102,6 @@ function Cookbook() {
   const settings = useSubmission();
   const deletion = useSubmission();
   const [share, setShare] = useState<string>();
-  const [showSyncOffer, setShowSyncOffer] = useState(false);
   const [published, setPublished] = useState<Record<string, ShareOptions>>({});
   const [community, setCommunity] = useState<Recipe[]>([]);
   const [following, setFollowing] = useState<Recipe[]>();
@@ -159,7 +166,7 @@ function Cookbook() {
       setRecipes(latest.current);
       setDraft(savedDraft);
       setGuestRecipes(data);
-      setOnboarding(!user?.personalization);
+      setOnboarding(!user?.personalization || !user.username);
       setShowDietPrompt(!localDiet && (!user || user.diet === 'any'));
       if (user) {
         setPreference(user.diet);
@@ -252,12 +259,30 @@ function Cookbook() {
 
   useEffect(() => {
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!selected) return false;
-      setSelected(undefined);
+      if (selected) setSelected(undefined);
+      else if (tab === 'saved' && collectionId) setCollectionId(undefined);
+      else return false;
       return true;
     });
     return () => back.remove();
-  }, [selected]);
+  }, [selected, tab, collectionId]);
+
+  async function refreshCollections() {
+    const owner = accountRef.current?.id;
+    if (!owner) return;
+    const request = ++collectionLoad.current;
+    setCollectionsFailed(false);
+    try {
+      const result = await readCollections(owner);
+      if (request === collectionLoad.current && accountRef.current?.id === owner) setCollections(result);
+    } catch {
+      if (request === collectionLoad.current && accountRef.current?.id === owner) setCollectionsFailed(true);
+    }
+  }
+
+  useEffect(() => {
+    if (account?.id) void refreshCollections();
+  }, [account?.id]);
 
   function write(id: string, update: (current: Recipe[]) => Recipe[]): Promise<void> {
     const owner = accountRef.current;
@@ -282,38 +307,25 @@ function Cookbook() {
 
   const discoveries = [...new Map([...featuredRecipes, ...community, ...(following ?? []), ...(openedPost ? [openedPost] : [])].map(recipe => [recipe.id, recipe])).values()];
 
-  function favorite(id: string) {
-    const found = discoveries.find((recipe) => recipe.id === id);
-    let previous: Recipe | undefined;
-    void write(id, (current) => {
-      previous = current.find((recipe) => recipe.id === id);
-      if (previous) return current.map((recipe) => recipe.id === id ? { ...recipe, favorite: !recipe.favorite } : recipe);
-      return found ? [{ ...found, favorite: true }, ...current] : current;
-    }).then(() => {
-      const undo = () => {
-        setNotice(undefined);
-        // Keep a discovered recipe in the book only if it was saved before this action.
-        void write(id, (current) => previous
-          ? current.map((recipe) => recipe.id === id ? { ...recipe, favorite: previous!.favorite } : recipe)
-          : current.filter((recipe) => recipe.id !== id)).catch(showError);
-      };
-      setNotice({ text: previous?.favorite ? 'Removed from Favorites' : 'Saved to Favorites', undo });
-    }).catch(showError);
-  }
-
-  function saveDiscovery(recipe: Recipe) {
-    void write(recipe.id, (current) => current.some((item) => item.id === recipe.id) ? current : [{ ...recipe }, ...current])
-      .then(() => {
-        setNotice({ text: 'Saved to your recipe book', undo: () => removeDiscovery(recipe) });
-        if (!accountRef.current) setShowSyncOffer(true);
-      }).catch(showError);
-  }
-
-  function removeDiscovery(recipe: Recipe) {
-    void write(recipe.id, (current) => current.filter((item) => item.id !== recipe.id)).then(() => {
-      setSelected(undefined);
-      setNotice({ text: 'Removed from your recipe book', undo: () => saveDiscovery(recipe) });
-    }).catch(showError);
+  async function updateRecipeCollections(recipe: Recipe, add: string[], remove: string[], created?: NewCollection) {
+    const owner = accountRef.current?.id;
+    if (!owner) throw new Error('Sign in to save this recipe.');
+    const operation = writes.current.then(async () => {
+      if (accountRef.current?.id !== owner) throw new Error('Your account changed. Try again.');
+      const snapshot = latest.current.find(item => item.id === recipe.id) ?? recipe;
+      await changeRecipeCollections(snapshot, add, remove, created);
+      if (accountRef.current?.id !== owner) return;
+      if ((add.length || created) && !latest.current.some(item => item.id === recipe.id)) {
+        latest.current = [snapshot, ...latest.current];
+        setRecipes(latest.current);
+      }
+      await refreshCollections();
+      if (accountRef.current?.id !== owner) return;
+      setCollectionRecipe(undefined);
+      setNotice({ text: add.length || created ? 'Saved to your collections' : 'Collections updated' });
+    });
+    writes.current = operation.catch(() => {});
+    await operation;
   }
 
   async function save(value: RecipeDraft, existingId?: string) {
@@ -324,8 +336,7 @@ function Cookbook() {
     setForm(undefined);
     if (!existingId) {
       rememberDraft(undefined);
-      if (!accountRef.current) setShowSyncOffer(true);
-      setNotice({ text: 'Saved to your recipe book', undo: () => {
+      setNotice({ text: 'Added to My recipes', undo: () => {
         void write(id, (current) => current.filter((recipe) => recipe.id !== id)).then(() => {
           rememberDraft({ mode: 'manual', draft: value });
           setNotice({ text: 'Moved back to drafts' });
@@ -336,6 +347,7 @@ function Cookbook() {
 
   async function remove(id: string) {
     await write(id, (current) => current.filter((recipe) => recipe.id !== id));
+    void refreshCollections();
     setSelected(undefined);
     setForm(undefined);
     forgetPost(id);
@@ -362,8 +374,9 @@ function Cookbook() {
   async function saveDiet(diet: Diet) {
     const owner = accountRef.current;
     if (owner && owner.diet !== diet) {
-      const updated = { ...owner, ...await saveProfile(owner.id, { diet }) };
+      const { diet: savedDiet } = await saveProfile(owner.id, { diet });
       if (accountRef.current?.id !== owner.id) return;
+      const updated = { ...accountRef.current, diet: savedDiet };
       accountRef.current = updated;
       setAccount(updated);
     }
@@ -435,10 +448,9 @@ function Cookbook() {
     setRecipes(session.recipes);
     setGuestRecipes(guest);
     setDraft(userDraft);
-    setOnboarding(!user.personalization);
+    setOnboarding(!user.personalization || !user.username);
     setAuth(false);
     setAuthError('');
-    setShowSyncOffer(false);
     if (intent) restoreIntent(parseIntent(intent));
     if (wasGuest && guest.length) setSyncPrompt(true);
     await AsyncStorage.removeItem(intentKey);
@@ -452,12 +464,14 @@ function Cookbook() {
       const guest = await readGuestRecipes();
       const batch = onlyId ? guest.filter(recipe => recipe.id === onlyId) : guest;
       const cloud = await importGuestRecipes(id, batch);
+      await importLegacySaves(id, batch);
       if (accountRef.current?.id !== id) return;
       const remaining = onlyId ? guest.filter(recipe => recipe.id !== onlyId) : [];
       await AsyncStorage.setItem(storageKey, JSON.stringify(remaining));
       if (accountRef.current?.id !== id) return;
       latest.current = cloud;
       setRecipes(cloud);
+      void refreshCollections();
       setGuestRecipes(remaining);
       setSyncPrompt(false);
       setNotice({ text: 'Recipes added to your account' });
@@ -471,6 +485,12 @@ function Cookbook() {
     accountRef.current = null;
     latest.current = [];
     setAccount(null);
+    collectionLoad.current += 1;
+    setCollections(undefined);
+    setCollectionsFailed(false);
+    setCollectionId(undefined);
+    setCollectionRecipe(undefined);
+    setCollectionEditor(undefined);
     setFollowing(undefined);
     setFollowingFailed(false);
     setFeed('explore');
@@ -547,18 +567,14 @@ function Cookbook() {
   function applyCookProfile(profile: Cook) {
     const owner = accountRef.current;
     if (owner?.id !== profile.user_id) return;
-    const updated = { ...owner, username: profile.handle };
+    const updated = { ...owner, name: profile.name, username: profile.handle };
     accountRef.current = updated;
     setAccount(updated);
   }
 
-  if (account && !account.username) return <View style={styles.safe}>
-    <EditCook key={account.id} account={account} duringSignup saved={applyCookProfile} />
-  </View>;
-
   const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError} />;
-  if (onboarding || !account) return <>
-    <Onboarding key={account?.id ?? 'signup'} accountId={account?.id} recipes={discoveries} complete={finishWelcome}
+  if (onboarding || !account || !account.username) return <>
+    <Onboarding key={account?.id ?? 'signup'} account={account} recipes={discoveries} complete={finishWelcome} profileSaved={applyCookProfile}
       signIn={accountsConfigured && !account ? () => setAuth(true) : undefined} />
     {notice?.error && <View style={[styles.notice, styles.noticeError]}><Copy accessibilityRole="alert">{notice.text}</Copy></View>}
     {authSheet}
@@ -566,13 +582,14 @@ function Cookbook() {
 
   const activeRecipe = recipes.find((recipe) => recipe.id === selected) ?? discoveries.find((recipe) => recipe.id === selected);
   const shareRecipe = recipes.find((recipe) => recipe.id === share);
-  const recipeSaved = Boolean(activeRecipe && recipes.some((recipe) => recipe.id === activeRecipe.id));
-  const recipeEditable = recipeSaved && activeRecipe?.discovery?.author === undefined && !activeRecipe?.id.startsWith('community:');
-  const exploreRecipes = (feed === 'following' ? following ?? [] : [...featuredRecipes, ...community])
-    .map((recipe) => ({ ...recipe, favorite: recipes.find((saved) => saved.id === recipe.id)?.favorite ?? false }));
-  const libraryActive = tab === 'saved';
+  const recipeEditable = Boolean(activeRecipe && recipes.some(recipe => recipe.id === activeRecipe.id)
+    && !activeRecipe.discovery && !activeRecipe.id.startsWith('community:'));
+  const exploreRecipes = feed === 'following' ? following ?? [] : [...featuredRecipes, ...community];
+  const savedIds = new Set(collections?.flatMap(collection => collection.recipeIds) ?? []);
+  const currentCollection = collections?.find(collection => collection.id === collectionId);
   function changeTab(next: Tab) {
     setSelected(undefined);
+    if (next === 'saved' && tab === 'saved') setCollectionId(undefined);
     setTab(next);
   }
   function startForm(state: FormState) {
@@ -592,21 +609,17 @@ function Cookbook() {
       {!activeRecipe && <StatusBar style="dark" />}
       <View style={[styles.safe, tab !== 'explore' && styles.inactiveTab]} pointerEvents={tab === 'explore' ? 'auto' : 'none'}
         aria-hidden={tab !== 'explore'} importantForAccessibility={tab === 'explore' ? 'auto' : 'no-hide-descendants'}>
-        <Library active={tab === 'explore'} explore recipes={exploreRecipes} filter="all" setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
+        <Library active={tab === 'explore'} recipes={exploreRecipes} savedIds={savedIds} onOpen={setSelected} onSave={setCollectionRecipe}
           social={{ feed, setFeed, openRecipe: openSocialRecipe, openBook: setBook, openCook: person => setCook({ id: person.user_id }),
             loading: feed === 'following' && following === undefined && !followingFailed,
             failed: feed === 'following' && followingFailed, retry: () => setFollowRevision(value => value + 1) }}
           personalization={account.personalization}
-          preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)}
+          preference={preference} onDiet={() => setDietSheet(true)}
           onDismissDiet={showDietPrompt ? () => void saveDiet('any').catch(showError) : undefined} />
       </View>
-      <View style={[styles.safe, !libraryActive && styles.inactiveTab]} pointerEvents={libraryActive ? 'auto' : 'none'}
-        aria-hidden={!libraryActive} importantForAccessibility={libraryActive ? 'auto' : 'no-hide-descendants'}>
-        <Library active={libraryActive} recipes={recipes.filter(recipe => recipe.favorite || !!recipe.discovery || recipe.id.startsWith('community:'))}
-          savedOnly filter={filter} setFilter={setFilter} onOpen={setSelected} onFavorite={favorite}
-          personalization={account.personalization}
-          preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)} />
-      </View>
+      {tab === 'saved' && <SavedCollections active={!activeRecipe} collections={collections} failed={collectionsFailed} retry={refreshCollections}
+        current={currentCollection} recipes={recipes} openCollection={setCollectionId} openRecipe={setSelected} manageRecipe={setCollectionRecipe}
+        create={() => setCollectionEditor({})} edit={collection => setCollectionEditor({ collection })} explore={() => changeTab('explore')} />}
       {tab === 'shopping' && <ShoppingList items={shopping}
         onToggle={(ids) => void updateShopping((current) => {
           const selected = current.filter(item => ids.has(item.id));
@@ -627,19 +640,35 @@ function Cookbook() {
       onAuthor={activeRecipe.discovery?.authorId ? () => setCook({ id: activeRecipe.discovery!.authorId! }) : undefined}
       reviewerId={account.id}
       allergens={account.personalization?.allergens}
-      onBack={() => setSelected(undefined)} onFavorite={() => favorite(activeRecipe.id)}
+      onBack={() => setSelected(undefined)} saved={savedIds.has(activeRecipe.id)} onSave={() => setCollectionRecipe(activeRecipe)}
       onAddIngredients={(indices) => addIngredients(activeRecipe, indices)}
-      onSave={!recipeSaved ? () => saveDiscovery(activeRecipe) : undefined}
-      onRemove={recipeSaved && !recipeEditable ? () => removeDiscovery(activeRecipe) : undefined}
       onEdit={recipeEditable ? () => setForm({ mode: 'manual', id: activeRecipe.id, draft: activeRecipe }) : undefined}
       onShare={recipeEditable && accountsConfigured ? () => {
         setShare(activeRecipe.id);
         if (!account) setAuth(true);
       } : undefined} />}
+    {collectionRecipe && <SaveToCollections key={collectionRecipe.id} recipe={collectionRecipe} collections={collections}
+      failed={collectionsFailed} retry={refreshCollections} close={() => setCollectionRecipe(undefined)}
+      save={(add, remove, created) => updateRecipeCollections(collectionRecipe, add, remove, created)} />}
+    {collectionEditor && <EditCollection collection={collectionEditor.collection} close={() => setCollectionEditor(undefined)}
+      save={async (id, name) => {
+        await saveCollection(account.id, id, name, !!collectionEditor.collection);
+        await refreshCollections();
+        if (accountRef.current?.id !== account.id) return;
+        setCollectionId(id);
+        setCollectionEditor(undefined);
+      }}
+      remove={async id => {
+        await deleteCollection(account.id, id);
+        await refreshCollections();
+        if (accountRef.current?.id !== account.id) return;
+        setCollectionId(undefined);
+        setCollectionEditor(undefined);
+      }} />}
     {cook && !editCook && !book && !creatingBook && <CookProfile lookup={cook} account={account} close={() => setCook(undefined)} edit={() => setEditCook(true)}
       openRecipe={openSocialRecipe} openBook={setBook} createBook={() => setCreatingBook(true)}
       followChanged={() => setFollowRevision(value => value + 1)} />}
-    {editCook && <EditCook account={account} close={() => setEditCook(false)} saved={profile => {
+    {editCook && <ProfileEditor userId={account.id} close={() => setEditCook(false)} saved={profile => {
       applyCookProfile(profile);
       setEditCook(false);
       setProfileRevision(value => value + 1);
@@ -656,8 +685,6 @@ function Cookbook() {
       {notice.undo && <Pressable accessibilityRole="button" onPress={notice.undo} style={styles.undo}><Copy style={styles.undoText}>Undo</Copy></Pressable>}
       {notice.viewList && <Pressable accessibilityRole="button" onPress={() => { setNotice(undefined); changeTab('shopping'); }} style={styles.undo}><Copy style={styles.undoText}>View list</Copy></Pressable>}
       {notice.persistent && <Pressable accessibilityRole="button" onPress={() => setNotice(undefined)} style={styles.undo}><Copy style={styles.undoText}>Dismiss</Copy></Pressable>}
-      {accountsConfigured && !account && showSyncOffer && notice.text === 'Saved to your recipe book' &&
-        <Pressable accessibilityRole="button" onPress={() => { setShowSyncOffer(false); setNotice(undefined); setAuth(true); }} style={styles.undo}><Copy style={styles.undoText}>Sync cookbook</Copy></Pressable>}
     </View>}
     {!activeRecipe && <GlassNav tab={tab} onChange={changeTab} onAdd={() => setAddMenu(true)} adding={addMenu || Boolean(form)} />}
     {addMenu && <Sheet title="Add a recipe" close={() => setAddMenu(false)}>

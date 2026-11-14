@@ -3,8 +3,10 @@ import { requireSupabase } from './supabase';
 import type { RecipeDraft } from './recipes';
 
 export type Banner = NonNullable<RecipeDraft['cover']>;
-export type Cook = { user_id: string; handle: string; name: string; bio: string; banner: Banner; website: string; social_link: string };
-const cookFields = 'user_id,handle,name,bio,banner,website,social_link';
+export type Cook = { user_id: string; handle: string; name: string; bio: string; banner: Banner; website: string; social_link: string;
+  avatar_image: string | null; banner_image: string | null };
+export type CookChanges = Partial<Omit<Cook, 'user_id'>>;
+const cookFields = 'user_id,handle,name,bio,banner,website,social_link,avatar_image,banner_image';
 export type CookLookup = { id: string } | { handle: string };
 export type RecipeBook = { id: string; cook_id: string; title: string; post_ids: string[] };
 const bookFields = 'id,cook_id,title,post_ids';
@@ -40,11 +42,11 @@ export async function searchCooks(term: string) {
   return data as Cook[];
 }
 
-export async function saveCook(cook: Pick<Cook, 'name' | 'handle' | 'bio'> & Partial<Pick<Cook, 'banner' | 'website' | 'social_link'>>, edit: boolean, ownerId: string) {
+export async function saveCook(cook: CookChanges, edit: boolean, ownerId: string) {
   const table = requireSupabase().from('cook_profiles');
   const { data, error } = await (edit ? table.update(cook).eq('user_id', ownerId) : table.insert(cook))
     .select(cookFields).single<Cook>();
-  if (error?.code === '23505') throw new Error('That handle is already taken. Try another one.');
+  if (error?.code === '23505') throw new Error('That username is already taken. Try another one.');
   if (error) throw new Error('Couldn’t save your public profile. Try again.');
   return data;
 }
