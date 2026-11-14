@@ -6,7 +6,17 @@ export const allergens = {
 export type Allergen = keyof typeof allergens;
 export const cookingStyles = { any: 'No preference', quick: 'Quick dinners', onePan: 'One-pan meals', prep: 'Meal prep' } as const;
 export type CookingStyle = keyof typeof cookingStyles;
-export type Personalization = { allergens: Allergen[]; cooking: CookingStyle };
+export type PreferredCookingStyle = Exclude<CookingStyle, 'any'>;
+export type Personalization = { allergens: Allergen[]; cooking: PreferredCookingStyle[] };
+
+export function readCookingPreferences(value: unknown): PreferredCookingStyle[] | null {
+  if (value === 'any') return [];
+  const choices = typeof value === 'string' ? [value] : value;
+  if (!Array.isArray(choices)) return null;
+  const valid = choices.filter((choice): choice is PreferredCookingStyle =>
+    typeof choice === 'string' && choice !== 'any' && Object.hasOwn(cookingStyles, choice));
+  return valid.length || !choices.length || choices.includes('any') ? [...new Set(valid)] : null;
+}
 
 const explicit: Record<Allergen, RegExp> = {
   gluten: /\b(wheat|barley|rye|spelt|oats?|gluten)\b/i,

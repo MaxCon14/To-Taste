@@ -7,7 +7,8 @@ import { Action, color, Copy, Cover, font } from './ui';
 import { useSubmission } from './FlowSheets';
 import { MotionPressable, Scene } from './motion';
 import { Glyph } from './Glyph';
-import { allergens, allergenWarnings, cookingStyles, warningLabels, type Allergen, type CookingStyle, type Personalization } from './allergens';
+import { allergens, cookingStyles, readCookingPreferences, warningLabels, type Allergen, type CookingStyle, type Personalization, type PreferredCookingStyle } from './allergens';
+import { recipeRecommendations } from './recipeRecommendations';
 import { dietOptions, type Diet, type Recipe } from './recipes';
 
 const allergenIcons: Record<Allergen, string> = {
@@ -18,21 +19,21 @@ const allergenIcons: Record<Allergen, string> = {
 const dietIcons: Record<Diet, string> = { any: '🍽️', vegan: '🌱', vegetarian: '🥕', pescatarian: '🐟' };
 const cookingIcons: Record<CookingStyle, string> = { any: '🍽️', quick: '⏱️', onePan: '🍳', prep: '🍱' };
 
-function PreferenceChoice({ label, active, onPress, symbol, single = false }: {
-  label: string; active: boolean; onPress: () => void; symbol?: string; single?: boolean;
+function PreferenceChoice({ label, active, onPress, symbol, single = false, featured = single }: {
+  label: string; active: boolean; onPress: () => void; symbol?: string; single?: boolean; featured?: boolean;
 }) {
   return <MotionPressable accessibilityLabel={label} accessibilityRole={single ? 'radio' : 'checkbox'} aria-checked={active}
-    onPress={onPress} style={[styles.choice, single && styles.featureChoice, active && styles.choiceActive]}>
+    onPress={onPress} style={[styles.choice, featured && styles.featureChoice, active && styles.choiceActive]}>
     <View style={styles.choiceTop}>
-      <View aria-hidden style={[styles.choiceIcon, single && styles.featureIcon]}>
-        {symbol ? <Copy style={[styles.symbol, single && styles.featureSymbol]}>{symbol}</Copy>
+      <View aria-hidden style={[styles.choiceIcon, featured && styles.featureIcon]}>
+        {symbol ? <Copy style={[styles.symbol, featured && styles.featureSymbol]}>{symbol}</Copy>
           : <Glyph name="check" color={color.ink} size={17} />}
       </View>
       <View style={[styles.choiceMark, active && styles.choiceMarkActive]}>
         {active && <Glyph name="check" color={color.white} size={12} />}
       </View>
     </View>
-    <Copy style={[styles.choiceLabel, single && styles.featureLabel]}>{label}</Copy>
+    <Copy style={[styles.choiceLabel, featured && styles.featureLabel]}>{label}</Copy>
   </MotionPressable>;
 }
 
@@ -56,7 +57,7 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
   const [restored, setRestored] = useState(!accountId || edit);
   const [selected, setSelected] = useState<Allergen[] | null>(initial?.allergens ?? null);
   const [diet, setDiet] = useState<Diet | null>(edit ? initialDiet : null);
-  const [cooking, setCooking] = useState<CookingStyle | null>(initial?.cooking ?? null);
+  const [cooking, setCooking] = useState<PreferredCookingStyle[] | null>(initial?.cooking ?? null);
   const { busy, error, run } = useSubmission();
   const draftKey = accountId && !edit ? `to-taste.onboarding.${accountId}` : undefined;
   useEffect(() => {
@@ -67,8 +68,10 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
       const draft = JSON.parse(value);
       setSelected(draft.selected);
       setDiet(draft.diet);
-      setCooking(draft.cooking);
-      setStep(draft.version !== 2 && draft.step === 5 ? 6 : draft.step);
+      const restoredCooking = readCookingPreferences(draft.cooking);
+      setCooking(restoredCooking);
+      const lastStep = draft.version !== 2 && draft.step === 5 ? 6 : draft.step;
+      setStep(lastStep === 6 && restoredCooking === null ? 5 : lastStep);
     }).catch(() => {}).finally(() => { if (active) setRestored(true); });
     return () => { active = false; };
   }, [draftKey]);
@@ -77,10 +80,9 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
   }, [draftKey, restored, step, selected, diet, cooking]);
   const visibleStep = accountId ? Math.max(3, step) : 1;
   const progress = visibleStep === 1 ? 1 : visibleStep - 1;
-  const recommendations = recipes.map(recipe => ({ recipe, warnings: allergenWarnings(recipe.ingredients, selected ?? []) }))
-    .sort((a, b) => Number(!!a.warnings.length) - Number(!!b.warnings.length)
-      || Number(b.recipe.discovery?.diet === diet) - Number(a.recipe.discovery?.diet === diet)
-      || Number(matchesCooking(b.recipe, cooking)) - Number(matchesCooking(a.recipe, cooking))).slice(0, 3);
+  const recommendations = visibleStep === 6
+    ? recipeRecommendations(recipes, diet ?? 'any', { allergens: selected ?? [], cooking: cooking ?? [] }).slice(0, 3)
+    : [];
 
   return <SafeAreaView style={styles.screen}>
     <ScrollView key={visibleStep} contentContainerStyle={styles.scroll}>
@@ -114,9 +116,15 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
         </>}
         {visibleStep === 5 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>What do you like to cook?</Copy>
-          <Copy style={styles.description}>Choose one cooking style to see more meals like it.</Copy>
-          <View accessibilityRole="radiogroup" accessibilityLabel="Cooking style" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
-            <PreferenceChoice single key={item} label={cookingStyles[item]} symbol={cookingIcons[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
+          <Copy style={styles.description}>Select all the meals you’d like to see more often, or choose No preference.</Copy>
+          <View style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
+            <PreferenceChoice featured key={item} label={cookingStyles[item]} symbol={cookingIcons[item]}
+              active={item === 'any' ? cooking?.length === 0 : cooking?.includes(item) ?? false}
+              onPress={() => setCooking(current => {
+                if (item === 'any') return [];
+                const choices = current ?? [];
+                return choices.includes(item) ? choices.filter(choice => choice !== item) : [...choices, item];
+              })} />)}</View>
           <Action label="See your recommendations" disabled={cooking === null} onPress={() => setStep(6)} />
         </>}
         {visibleStep === 6 && restored && <>
@@ -142,13 +150,6 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
       </Scene>
     </ScrollView>
   </SafeAreaView>;
-}
-
-export function matchesCooking(recipe: Recipe, cooking?: CookingStyle | null) {
-  if (cooking === 'quick') return Number(recipe.minutes) > 0 && Number(recipe.minutes) <= 30;
-  if (cooking === 'onePan') return !!recipe.discovery?.onePan;
-  if (cooking === 'prep') return Number.parseInt(recipe.servings, 10) >= 4;
-  return false;
 }
 
 const styles = StyleSheet.create({

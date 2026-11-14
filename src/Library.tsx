@@ -5,8 +5,8 @@ import { Glyph } from './Glyph';
 import { Action, color, Copy, Cover, Favorite, font, Segment, segmentTrack } from './ui';
 import { MotionPressable as Pressable, Scene } from './motion';
 import { dietOptions, lines, matchesDiet, type Diet, type Recipe } from './recipes';
-import { allergenWarnings, warningLabels, type Personalization } from './allergens';
-import { matchesCooking } from './Onboarding';
+import { warningLabels, type Personalization } from './allergens';
+import { recipeRecommendations } from './recipeRecommendations';
 
 export type Filter = 'all' | 'favorites';
 type Props = {
@@ -26,19 +26,15 @@ export function Library({ recipes, filter, setFilter, onOpen, onFavorite, onAdd,
   const [showFilters, setShowFilters] = useState(false);
   const activeFilters = Number(collection !== 'All') + Number(strict !== 'any');
   const search = query.trim().toLowerCase();
-  const visible = recipes.filter((recipe) => (explore || filter === 'all' || recipe.favorite)
+  const matching = recipes.filter((recipe) => (explore || filter === 'all' || recipe.favorite)
     && (!search || `${recipe.title}\n${recipe.ingredients}`.toLowerCase().includes(search))
     && (!explore || (matchesDiet(recipe, strict)
       && (collection !== 'Under 30 min' || (Number(recipe.minutes) > 0 && Number(recipe.minutes) < 30))
       && (collection !== 'One pan' || recipe.discovery?.onePan)
       && (collection !== 'Weekend' || recipe.discovery?.weekend))));
-  const warnings = new Map(visible.map(recipe => [recipe.id, warningLabels(allergenWarnings(recipe.ingredients, personalization?.allergens ?? []))]));
-  if (explore) {
-    const score = (recipe: Recipe) => preference !== 'any' && recipe.discovery?.diet === preference ? 2 : Number(matchesDiet(recipe, preference));
-    visible.sort((a, b) => Number(!!warnings.get(a.id)?.length) - Number(!!warnings.get(b.id)?.length)
-      || score(b) - score(a)
-      || Number(matchesCooking(b, personalization?.cooking)) - Number(matchesCooking(a, personalization?.cooking)));
-  }
+  const entries = recipeRecommendations(matching, preference, personalization, explore);
+  const visible = entries.map(({ recipe }) => recipe);
+  const warnings = new Map(entries.map(({ recipe, warnings }) => [recipe.id, warningLabels(warnings)]));
   const filtered = Boolean(search || collection !== 'All' || strict !== 'any');
   const featured = explore && !filtered ? visible[0] : undefined;
   const rest = featured ? visible.slice(1) : visible;

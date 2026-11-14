@@ -1,7 +1,7 @@
 import type { Diet, Recipe } from './recipes';
 import type { ShareOptions } from './FlowSheets';
 import { requireSupabase, supabase } from './supabase';
-import { allergens, cookingStyles, type Allergen, type Personalization } from './allergens';
+import { allergens, readCookingPreferences, type Allergen, type Personalization } from './allergens';
 
 export type Account = { id: string; name: string; diet: Diet; personalization?: Personalization };
 export type Session = { user: Account | null; recipes: Recipe[] };
@@ -35,9 +35,10 @@ export async function readSession(): Promise<Session> {
   ]);
   if (profile.error) throw profile.error;
   const raw = session.user.user_metadata?.to_taste_preferences;
+  const cooking = readCookingPreferences(raw?.cooking);
   const personalization: Personalization | undefined = raw && Array.isArray(raw.allergens)
-    && typeof raw.cooking === 'string' && Object.hasOwn(cookingStyles, raw.cooking)
-    ? { allergens: [...new Set<Allergen>(raw.allergens.filter((item: unknown) => typeof item === 'string' && Object.hasOwn(allergens, item)))], cooking: raw.cooking }
+    && cooking !== null
+    ? { allergens: [...new Set<Allergen>(raw.allergens.filter((item: unknown) => typeof item === 'string' && Object.hasOwn(allergens, item)))], cooking }
     : undefined;
   return { user: { id, name: profile.data?.display_name ?? '', diet: profile.data?.diet ?? 'any', personalization }, recipes };
 }
