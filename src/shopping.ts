@@ -27,3 +27,20 @@ export function groupShoppingItems(items: ShoppingItem[]) {
   }
   return [...groups.values()];
 }
+
+export function groupShoppingByRecipe(items: ShoppingItem[]) {
+  const recipes = new Map<string, ShoppingGroup>();
+  for (const item of items) {
+    let key = `title:${item.recipe}`;
+    try {
+      const id: unknown = JSON.parse(item.id);
+      if (Array.isArray(id) && typeof id[0] === 'string' && typeof id[1] === 'number') key = `recipe:${id[0]}`;
+    } catch {
+      // Older items without an encoded recipe ID can still be grouped by title.
+    }
+    const recipe = recipes.get(key);
+    if (recipe) recipe.items.push(item);
+    else recipes.set(key, { key, name: item.recipe, items: [item] });
+  }
+  return [...recipes.values()];
+}

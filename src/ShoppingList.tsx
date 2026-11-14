@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Glyph } from './Glyph';
 import { Scene, useScreenFocus } from './motion';
-import { Action, color, Copy, font, IconButton, IngredientCard } from './ui';
+import { Action, color, Copy, font, IconButton, IngredientCard, Segment, segmentTrack } from './ui';
 import { ingredientAmount, parseIngredient } from './ingredients';
-import { groupShoppingItems, type ShoppingItem } from './shopping';
+import { groupShoppingByRecipe, groupShoppingItems, type ShoppingItem } from './shopping';
 
 export function ShoppingList({ items, onToggle, onRemove, onClearChecked, onExplore }: {
   items: ShoppingItem[];
@@ -13,19 +14,43 @@ export function ShoppingList({ items, onToggle, onRemove, onClearChecked, onExpl
   onExplore: () => void;
 }) {
   useScreenFocus('shopping-heading');
-  const groups = groupShoppingItems(items);
-  const checked = groups.filter(group => group.items.every(item => item.checked)).length;
+  const [view, setView] = useState<'recipe' | 'ingredient'>('recipe');
+  const byRecipe = view === 'recipe';
+  const groups = byRecipe ? groupShoppingByRecipe(items) : groupShoppingItems(items);
+  const total = byRecipe ? items.length : groups.length;
+  const checked = byRecipe ? items.filter(item => item.checked).length
+    : groups.filter(group => group.items.every(item => item.checked)).length;
   const hasChecked = items.some(item => item.checked);
   return <Scene style={styles.screen}>
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
       <View style={styles.content}>
         <Copy testID="shopping-heading" accessibilityRole="header" style={styles.title}>Shopping list</Copy>
         {items.length ? <>
+          <View style={segmentTrack}>
+            <Segment label="By recipe" active={byRecipe} onPress={() => setView('recipe')} />
+            <Segment label="By ingredient" active={!byRecipe} onPress={() => setView('ingredient')} />
+          </View>
           <View style={styles.summary}>
-            <Copy accessibilityLiveRegion="polite" style={styles.helper}>{checked} of {groups.length} checked</Copy>
+            <Copy accessibilityLiveRegion="polite" style={styles.helper}>{checked} of {total} checked</Copy>
             {hasChecked && <Action secondary label="Clear checked" onPress={onClearChecked} />}
           </View>
-          {groups.map(group => {
+          {byRecipe ? groups.map(recipe => <View key={recipe.key} style={styles.recipeSection}>
+            <View style={styles.recipeHeader}>
+              <Glyph name="book" color={color.secondaryInk} size={18} />
+              <Copy accessibilityRole="header" style={styles.recipeTitle}>{recipe.name}</Copy>
+            </View>
+            {recipe.items.map(item => {
+              const ids = new Set([item.id]);
+              return <View key={item.id} style={styles.row}>
+                <View style={styles.item}>
+                  <IngredientCard line={item.line} checked={item.checked} toggle={() => onToggle(ids)} />
+                </View>
+                <IconButton label={`Remove ${item.line} from ${recipe.name}`} onPress={() => onRemove(ids)}>
+                  <Glyph name="trash" color={color.secondaryInk} size={16} />
+                </IconButton>
+              </View>;
+            })}
+          </View>) : groups.map(group => {
             const ids = new Set(group.items.map(item => item.id));
             const complete = group.items.every(item => item.checked);
             const shared = group.items.length > 1;
@@ -69,6 +94,9 @@ const styles = StyleSheet.create({
   helper: { color: color.secondaryInk, lineHeight: 22 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   group: { gap: 8 },
+  recipeSection: { backgroundColor: color.surface, borderWidth: 1, borderColor: color.rule, borderRadius: 22, padding: 12 },
+  recipeHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, marginBottom: 4, backgroundColor: color.muted, borderRadius: 12 },
+  recipeTitle: { flex: 1, fontFamily: font.bold, fontSize: 17 },
   item: { flex: 1, minWidth: 0 },
   sources: { paddingLeft: 60, gap: 4 },
   source: { color: color.secondaryInk, fontSize: 13 },
