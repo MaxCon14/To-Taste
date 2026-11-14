@@ -54,12 +54,12 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
       setSelected(draft.selected);
       setDiet(draft.diet);
       setCooking(draft.cooking);
-      setStep(draft.step);
+      setStep(draft.version !== 2 && draft.step === 5 ? 6 : draft.step);
     }).catch(() => {}).finally(() => { if (active) setRestored(true); });
     return () => { active = false; };
   }, [draftKey]);
   useEffect(() => {
-    if (draftKey && restored) void AsyncStorage.setItem(draftKey, JSON.stringify({ step, selected, diet, cooking })).catch(() => {});
+    if (draftKey && restored) void AsyncStorage.setItem(draftKey, JSON.stringify({ version: 2, step, selected, diet, cooking })).catch(() => {});
   }, [draftKey, restored, step, selected, diet, cooking]);
   const visibleStep = accountId ? Math.max(3, step) : 1;
   const progress = visibleStep === 1 ? 1 : visibleStep - 1;
@@ -73,9 +73,9 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
       <View style={styles.header}>
         <Image source={require('../assets/icon.png')} style={styles.mark} />
         <Copy style={styles.brand}>To Taste</Copy>
-        <Copy style={styles.progressLabel}>{progress} / 4</Copy>
+        <Copy style={styles.progressLabel}>{progress} / 5</Copy>
       </View>
-      <View style={styles.track}><View style={[styles.fill, { width: `${progress * 25}%` }]} /></View>
+      <View style={styles.track}><View style={[styles.fill, { width: `${progress * 20}%` }]} /></View>
       <Scene key={visibleStep} style={styles.content}>
         {visibleStep === 1 && <>
           <View style={styles.art}><OnboardingArtwork scene="cookbook" size={290} /></View>
@@ -90,22 +90,19 @@ export function Onboarding({ accountId, signIn, initialDiet, initial, recipes, c
           <Action label="Continue" disabled={selected === null} onPress={() => setStep(4)} />
         </>}
         {visibleStep === 4 && restored && <>
-          <Copy accessibilityRole="header" style={styles.title}>Make Explore yours.</Copy>
-          <Copy style={styles.description}>Choose one answer in each section to personalize your recipe recommendations.</Copy>
-          <View style={styles.preferenceSection}>
-            <Copy accessibilityRole="header" style={styles.sectionTitle}>Diet</Copy>
-            <Copy style={styles.sectionHint}>How do you usually eat?</Copy>
-            <DietChoices selected={diet} setDiet={setDiet} />
-          </View>
-          <View style={styles.preferenceSection}>
-            <Copy accessibilityRole="header" style={styles.sectionTitle}>Cooking style</Copy>
-            <Copy style={styles.sectionHint}>What kind of meals would you like to see more often?</Copy>
-            <View accessibilityRole="radiogroup" accessibilityLabel="Cooking style" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
-            <PreferenceChoice single key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
-          </View>
-          <Action label="See your recommendations" disabled={diet === null || cooking === null} onPress={() => setStep(5)} />
+          <Copy accessibilityRole="header" style={styles.title}>How do you usually eat?</Copy>
+          <Copy style={styles.description}>Choose one diet preference to see more recipes that suit you.</Copy>
+          <DietChoices selected={diet} setDiet={setDiet} />
+          <Action label="Continue" disabled={diet === null} onPress={() => setStep(5)} />
         </>}
         {visibleStep === 5 && restored && <>
+          <Copy accessibilityRole="header" style={styles.title}>What do you like to cook?</Copy>
+          <Copy style={styles.description}>Choose one cooking style to see more meals like it.</Copy>
+          <View accessibilityRole="radiogroup" accessibilityLabel="Cooking style" style={styles.choices}>{(Object.keys(cookingStyles) as CookingStyle[]).map(item =>
+            <PreferenceChoice single key={item} label={cookingStyles[item]} active={cooking === item} onPress={() => setCooking(item)} />)}</View>
+          <Action label="See your recommendations" disabled={cooking === null} onPress={() => setStep(6)} />
+        </>}
+        {visibleStep === 6 && restored && <>
           <Copy accessibilityRole="header" style={styles.title}>Your first recipes.</Copy>
           <Copy style={styles.description}>A few ideas to get you cooking. Check the full ingredient list before you start.</Copy>
           {recommendations.map(({ recipe, warnings }) => <View style={styles.recipe} key={recipe.id}>
@@ -149,9 +146,6 @@ const styles = StyleSheet.create({
   content: { gap: 16, paddingTop: 26 },
   title: { fontFamily: font.bold, fontSize: 36, lineHeight: 41, letterSpacing: -1.6 },
   description: { fontSize: 16, lineHeight: 24, color: color.secondaryInk },
-  preferenceSection: { gap: 8, paddingTop: 14, borderTopWidth: 1, borderTopColor: color.rule },
-  sectionTitle: { fontFamily: font.bold, fontSize: 18 },
-  sectionHint: { color: color.secondaryInk, fontSize: 14, lineHeight: 20 },
   art: { alignItems: 'center', overflow: 'hidden' },
   choices: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
   choice: { width: '49%', minHeight: 56, padding: 10, gap: 6, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: color.rule, backgroundColor: color.surface, borderRadius: 14 },
