@@ -12,7 +12,8 @@ import { Onboarding } from './Onboarding';
 import { RecipeForm, type FormState } from './RecipeForm';
 import { RecipeScreen } from './RecipeScreen';
 import { featuredRecipes, lines, type Diet, type Recipe, type RecipeDraft } from './recipes';
-import { ShoppingList, type ShoppingItem } from './ShoppingList';
+import { ShoppingList } from './ShoppingList';
+import type { ShoppingItem } from './shopping';
 import { Action, color, Copy, font } from './ui';
 import { DietSheet, Profile, RecipeOption, ShareSheet, Sheet, useSubmission, type ShareOptions } from './FlowSheets';
 import { AccountAccess } from './AccountAccess';
@@ -171,19 +172,22 @@ function Cookbook() {
     return operation;
   }
 
-  function addIngredients(recipe: Recipe) {
+  async function addIngredients(recipe: Recipe, indices: number[]) {
     let added = 0;
-    void updateShopping((current) => {
+    const selected = new Set(indices);
+    await updateShopping((current) => {
       const existing = new Set(current.map((item) => item.id));
-      const items = lines(recipe.ingredients).map((line, index): ShoppingItem => ({
-        id: JSON.stringify([recipe.id, index, line]), line, recipe: recipe.title, checked: false,
-      })).filter((item) => !existing.has(item.id));
+      const items = lines(recipe.ingredients).flatMap((line, index): ShoppingItem[] => {
+        const id = JSON.stringify([recipe.id, index, line]);
+        return selected.has(index) && !existing.has(id) ? [{ id, line, recipe: recipe.title, checked: false }] : [];
+      });
       added = items.length;
       return added ? [...current, ...items] : current;
-    }).then(() => setNotice({
+    });
+    setNotice({
       text: added ? `Added ${added} ${added === 1 ? 'ingredient' : 'ingredients'} to your list` : 'These ingredients are already on your list',
       viewList: true,
-    })).catch(() => {});
+    });
   }
 
   function refreshCommunity() {
@@ -513,8 +517,12 @@ function Cookbook() {
           preference={preference} onDiet={() => setDietSheet(true)} onAdd={() => setAddMenu(true)} />
       </View>
       {tab === 'shopping' && <ShoppingList items={shopping}
-        onToggle={(id) => void updateShopping((current) => current.map((item) => item.id === id ? { ...item, checked: !item.checked } : item))}
-        onRemove={(id) => void updateShopping((current) => current.filter((item) => item.id !== id))}
+        onToggle={(ids) => void updateShopping((current) => {
+          const selected = current.filter(item => ids.has(item.id));
+          const checked = selected.some(item => !item.checked);
+          return current.map(item => ids.has(item.id) ? { ...item, checked } : item);
+        })}
+        onRemove={(ids) => void updateShopping((current) => current.filter((item) => !ids.has(item.id)))}
         onClearChecked={() => void updateShopping((current) => current.filter((item) => !item.checked))}
         onExplore={() => changeTab('explore')} />}
       {tab === 'profile' && <Scene style={styles.safe}><Profile account={account} diet={preference} onDiet={() => setDietSheet(true)} onAuth={() => setAuth(true)} onLogout={() => void logout()}
@@ -523,7 +531,7 @@ function Cookbook() {
     </SafeAreaView>
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
       onBack={() => setSelected(undefined)} onFavorite={() => favorite(activeRecipe.id)}
-      onAddIngredients={() => addIngredients(activeRecipe)}
+      onAddIngredients={(indices) => addIngredients(activeRecipe, indices)}
       onSave={!recipeSaved ? () => saveDiscovery(activeRecipe) : undefined}
       onRemove={recipeSaved && !recipeEditable ? () => removeDiscovery(activeRecipe) : undefined}
       onEdit={recipeEditable ? () => setForm({ mode: 'manual', id: activeRecipe.id, draft: activeRecipe }) : undefined}

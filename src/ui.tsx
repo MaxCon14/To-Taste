@@ -91,11 +91,13 @@ export function IngredientPreview({ ingredients }: { ingredients: string }) {
   </View>;
 }
 
-export function IngredientCard({ line, checked, toggle }: { line: string; checked?: boolean; toggle?: () => void }) {
+export function IngredientCard({ line, checked, toggle, strikeChecked = true }: {
+  line: string; checked?: boolean; toggle?: () => void; strikeChecked?: boolean;
+}) {
   const ingredient = parseIngredient(line);
   const content = <>
     <View style={styles.ingredientEmoji}><Copy style={{ fontSize: 26 }}>{ingredient.emoji}</Copy></View>
-    <Copy style={[styles.ingredientName, checked && styles.struck]}>{ingredient.name}</Copy>
+    <Copy style={[styles.ingredientName, checked && strikeChecked && styles.struck]}>{ingredient.name}</Copy>
     {!!ingredient.quantity && <Copy style={styles.ingredientAmount}>{ingredientAmount(ingredient)}</Copy>}
     {toggle && <View style={[styles.checkbox, checked && styles.checked]}>
       {checked && <Glyph name="check" size={12} color={color.white} />}

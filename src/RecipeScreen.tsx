@@ -7,16 +7,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MotionPressable as Pressable, Scene, useSceneMotion, useScreenFocus } from './motion';
 import { Glyph } from './Glyph';
 import { CookMode, type CookingTimer } from './CookMode';
+import { Sheet, useSubmission } from './FlowSheets';
 import { dietOptions, lines, type Recipe } from './recipes';
 import { Action, color, Copy, Cover, Favorite, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
 
 export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSave, onRemove, onAddIngredients }: {
   recipe: Recipe; onBack: () => void; onEdit?: () => void; onFavorite: () => void; onShare?: () => void; onSave?: () => void; onRemove?: () => void;
-  onAddIngredients: () => void;
+  onAddIngredients: (indices: number[]) => Promise<void>;
 }) {
   const motion = useSceneMotion(recipe.id, 24);
   useScreenFocus('recipe-title');
   const [checked, setChecked] = useState<number[]>([]);
+  const [shoppingSelection, setShoppingSelection] = useState<number[] | null>(null);
+  const shoppingSubmission = useSubmission();
   const [section, setSection] = useState<'ingredients' | 'directions'>('ingredients');
   const [sourceError, setSourceError] = useState(false);
   const [photoBehindStatus, setPhotoBehindStatus] = useState(true);
@@ -82,7 +85,10 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
                 if (Platform.OS !== 'web') void Haptics.selectionAsync().catch(() => {});
                 setChecked((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
               }} />)}
-            {ingredients.length > 0 && <Action secondary label="Add to shopping list" onPress={onAddIngredients} style={[styles.wideAction, styles.shoppingAction]}>
+            {ingredients.length > 0 && <Action secondary label="Add to shopping list" onPress={() => {
+              shoppingSubmission.setError('');
+              setShoppingSelection([]);
+            }} style={[styles.wideAction, styles.shoppingAction]}>
               <Glyph name="shopping" color={color.ink} />
             </Action>}
           </View> : <View>
@@ -107,6 +113,29 @@ export function RecipeScreen({ recipe, onBack, onEdit, onFavorite, onShare, onSa
         <Glyph name="forward" color={color.white} size={17} />
       </Action>
     </View>}
+    {shoppingSelection !== null && <Sheet title="What do you need?" busy={shoppingSubmission.busy} close={() => setShoppingSelection(null)}>
+      <Copy style={styles.sourceText}>Select the ingredients you need to buy. Leave anything you already have unchecked.</Copy>
+      <View style={styles.sectionTop}>
+        <Copy accessibilityLiveRegion="polite" style={styles.progress}>{shoppingSelection.length} selected</Copy>
+        <Action secondary disabled={shoppingSubmission.busy}
+          label={shoppingSelection.length === ingredients.length ? 'Clear selection' : 'Select all'}
+          onPress={() => setShoppingSelection(shoppingSelection.length === ingredients.length ? [] : ingredients.map((_, index) => index))} />
+      </View>
+      <View>
+        {ingredients.map((line, index) => <IngredientCard key={index} line={line} strikeChecked={false}
+          checked={shoppingSelection.includes(index)} toggle={() => {
+            if (shoppingSubmission.busy) return;
+            setShoppingSelection(current => current?.includes(index)
+              ? current.filter(item => item !== index) : [...(current ?? []), index]);
+          }} />)}
+      </View>
+      {shoppingSubmission.error ? <Copy accessibilityRole="alert">{shoppingSubmission.error}</Copy> : null}
+      <Action label={shoppingSubmission.busy ? 'Adding…' : 'Add selected to shopping list'}
+        disabled={shoppingSubmission.busy || !shoppingSelection.length} onPress={() => void shoppingSubmission.run(async () => {
+          await onAddIngredients(shoppingSelection);
+          setShoppingSelection(null);
+        })} />
+    </Sheet>}
     {cooking && <CookMode recipe={recipe} stepIndex={cookStep} setStep={setCookStep} timer={timer} setTimer={setTimer} close={() => setCooking(false)} />}
   </Animated.View>;
 }
