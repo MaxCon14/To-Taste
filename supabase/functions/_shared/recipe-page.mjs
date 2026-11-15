@@ -3,9 +3,9 @@ import { request } from 'node:https';
 import { Buffer } from 'node:buffer';
 import ipaddr from 'ipaddr.js';
 
-const maxBytes = 4 * 1024 * 1024;
+export const maxRecipePageBytes = 4 * 1024 * 1024;
 
-export async function fetchRecipePage(input, signal, redirects = 0) {
+export async function publicRecipeDestination(input, redirects) {
   const url = new URL(input);
   if (url.protocol !== 'https:' || url.username || url.password || url.port || redirects > 4 || url.href.length > 2048
     || !url.hostname.includes('.') || ipaddr.isValid(url.hostname)) {
@@ -16,7 +16,11 @@ export async function fetchRecipePage(input, signal, redirects = 0) {
     throw new Error('Only public HTTPS pages can be imported.');
   }
   const destination = addresses.find(({ family }) => family === 4) ?? addresses[0];
+  return { url, destination };
+}
 
+export async function fetchRecipePage(input, signal, redirects = 0) {
+  const { url, destination } = await publicRecipeDestination(input, redirects);
   return new Promise((resolvePage, rejectPage) => {
     // Connect to the vetted IP. Preserve the original TLS and HTTP hostname.
     const upstream = request({
@@ -41,7 +45,7 @@ export async function fetchRecipePage(input, signal, redirects = 0) {
       let size = 0;
       incoming.on('data', chunk => {
         size += chunk.length;
-        if (size > maxBytes) incoming.destroy(new Error('Recipe page is too large.'));
+        if (size > maxRecipePageBytes) incoming.destroy(new Error('Recipe page is too large.'));
         else chunks.push(chunk);
       });
       incoming.on('end', () => resolvePage({ html: Buffer.concat(chunks).toString('utf8'), url: url.href }));

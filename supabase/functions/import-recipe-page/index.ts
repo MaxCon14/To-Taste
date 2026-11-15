@@ -1,5 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.119.0';
-import { fetchRecipePage } from '../_shared/recipe-page.mjs';
+import { fetchPinnedPage } from './pinned-page.mjs';
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -39,8 +39,10 @@ export default {
       }
       if (!length) return reply(400, { error: 'Enter a recipe link.' });
       const raw = new TextDecoder().decode(bytes.subarray(0, length));
-      return reply(200, await fetchRecipePage(raw, AbortSignal.timeout(11000)));
-    } catch {
+      return reply(200, await fetchPinnedPage(raw, AbortSignal.timeout(11000)));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message.split('\n')[0].replace(/https?:\/\/\S+/g, '[URL]') : 'Unknown upstream error';
+      console.warn('Recipe page request failed', message);
       return reply(422, { error: 'This page couldn’t be imported.' });
     }
   },
