@@ -10,17 +10,20 @@ import { ProfileAvatar, ProfileBanner, profileUrl } from './ProfileEditor';
 import { profileImageUrl } from './profilePhotos';
 import { Action, color, Copy, Cover, font, IconButton, Segment, segmentTrack } from './ui';
 import { CollectionRow } from './RecipeBooks';
+import { blockCook } from './moderation';
 
-export function CookProfile({ lookup, account, close, edit, openRecipe, followChanged, openBook, createBook, personal }: {
+export function CookProfile({ lookup, account, close, edit, openRecipe, followChanged, openBook, createBook, personal, blocked }: {
   lookup: CookLookup; account: Account; close?: () => void; edit: () => void;
   openRecipe: (recipe: Recipe) => void; followChanged: () => void;
   openBook: (book: RecipeBook) => void; createBook: () => void;
+  blocked?: () => void;
   personal?: { recipes: Recipe[]; open: (id: string) => void; add: () => void; settings: () => void; revision: number; section: 'posts' | 'recipes' | 'books'; setSection: (section: 'posts' | 'recipes' | 'books') => void };
 }) {
   const [data, setData] = useState<{ cook: Cook | null; posts: Recipe[]; following: boolean; books: RecipeBook[] }>();
   const { busy, error, run } = useSubmission();
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [confirmBlock, setConfirmBlock] = useState(false);
   const revision = personal?.revision;
   const lookupId = 'id' in lookup ? lookup.id : undefined;
   const lookupHandle = 'handle' in lookup ? lookup.handle : undefined;
@@ -76,7 +79,17 @@ export function CookProfile({ lookup, account, close, edit, openRecipe, followCh
             catch (cause) { if (!(cause instanceof Error && cause.name === 'AbortError')) throw cause; }
           } else await navigator.clipboard.writeText(link);
         })}><Glyph name="share" color={color.ink} size={17} /></Action>}
+        {!own && blocked && !confirmBlock && <Action secondary label="Block" disabled={busy} onPress={() => setConfirmBlock(true)} />}
         </View>
+        {!own && blocked && confirmBlock && <View style={styles.empty}>
+          <Copy style={styles.name}>Block {cook.name}?</Copy>
+          <Copy style={styles.secondary}>You’ll stop seeing each other in search and the feed, and any follows between you will be removed.</Copy>
+          <Action label="Block account" disabled={busy} onPress={() => void run(async () => {
+            await blockCook(cook.user_id, cook.name);
+            blocked();
+          })} />
+          <Action secondary label="Cancel" disabled={busy} onPress={() => setConfirmBlock(false)} />
+        </View>}
       </> : own ? <Action label="Create public profile" onPress={edit} /> : <Copy style={styles.secondary}>{'handle' in lookup ? 'That handle was not found.' : 'This cook hasn’t set up a public profile yet.'}</Copy>}
       {personal && <View style={segmentTrack}>
         <Segment label="Posts" active={section === 'posts'} onPress={() => personal.setSection('posts')} />

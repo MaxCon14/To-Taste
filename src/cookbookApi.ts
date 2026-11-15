@@ -92,6 +92,7 @@ export async function searchRecipePosts(term: string) {
 }
 
 export async function readBookRecipes(ids: string[]) {
+  if (!ids.length) return [];
   const { data, error } = await requireSupabase().from('community_recipes').select('id,user_id,recipe,options').in('id', ids);
   if (error) throw error;
   const posts = new Map(publishedRecipes(data as Publication[]).map(recipe => [recipe.id, recipe]));

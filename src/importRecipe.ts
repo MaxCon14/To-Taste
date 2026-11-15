@@ -135,17 +135,19 @@ function socialCaptionFromHtml(html: string): string {
   return entities.decode(caption);
 }
 
-export async function importRecipe(input: string, web: boolean): Promise<RecipeDraft> {
+export async function importRecipe(input: string, web: boolean, cloud?: { endpoint: string; token: string; key: string }): Promise<RecipeDraft> {
   const url = normalizeRecipeUrl(input);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(web ? `/api/import?url=${encodeURIComponent(url)}` : url, {
+    const response = await fetch(cloud ? cloud.endpoint : web ? `/api/import?url=${encodeURIComponent(url)}` : url, {
       signal: controller.signal,
-      headers: { Accept: web ? 'application/json' : 'text/html' },
+      ...(cloud && { method: 'POST', body: url }),
+      headers: cloud ? { Authorization: `Bearer ${cloud.token}`, apikey: cloud.key, 'Content-Type': 'text/plain' }
+        : { Accept: web ? 'application/json' : 'text/html' },
     });
     if (!response.ok) throw new Error();
-    const page = web ? await response.json() as { html: string; url: string }
+    const page = cloud || web ? await response.json() as { html: string; url: string }
       : { html: await response.text(), url: response.url || url };
     const recipe = recipeFromHtml(page.html, page.url)
       ?? (isSocialRecipeLink(url) ? recipeFromCaption(socialCaptionFromHtml(page.html), url) : undefined);

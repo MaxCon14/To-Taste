@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Animated, Linking, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
@@ -11,10 +12,12 @@ import { dietOptions, lines, type Recipe } from './recipes';
 import { allergenWarnings, allergens as allergenNames, warningLabels, type Allergen } from './allergens';
 import { RecipeReviews } from './RecipeReviews';
 import { reviewTarget } from './reviewApi';
+import type { ReportTarget } from './moderation';
 import { Action, color, Copy, Cover, SaveRecipeButton, font, IconButton, IngredientCard, RecipeFacts, Segment, segmentTrack } from './ui';
 
-export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, onAddIngredients, onAuthor, allergens = [], reviewerId }: {
+export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, onShareLink, onAddIngredients, onAuthor, onCooked, onReport, allergens = [], reviewerId }: {
   recipe: Recipe; onBack: () => void; onEdit?: () => void; saved: boolean; onSave: () => void; onShare?: () => void;
+  onShareLink?: () => void; onCooked: () => Promise<void>; onReport: (target: ReportTarget) => void;
   onAddIngredients: (indices: number[]) => Promise<void>;
   allergens?: Allergen[];
   reviewerId?: string;
@@ -31,6 +34,11 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
   const [cooking, setCooking] = useState(false);
   const [cookStep, setCookStep] = useState(0);
   const [timer, setTimer] = useState<CookingTimer>();
+  const [progressReady, setProgressReady] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [finish, setFinish] = useState<'finish' | 'saved' | 'review'>();
+  const [reviewRevision, setReviewRevision] = useState(0);
+  const cookSubmission = useSubmission();
   const photoBehindStatusRef = useRef(true);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -43,6 +51,30 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
   const warnings = matches.filter(match => allergens.includes(match.allergen));
   const flagged = listedAllergens.filter(allergen => matches.some(match => match.allergen === allergen));
   const instructions = lines(recipe.instructions);
+  const target = reviewTarget(recipe.id);
+  const cookProgressKey = reviewerId ? `to-taste.cooking.${reviewerId}.${recipe.id}` : undefined;
+  useEffect(() => {
+    if (!cookProgressKey) { setProgressReady(true); return; }
+    let active = true;
+    void AsyncStorage.getItem(cookProgressKey).then(value => {
+      if (!active || !value) return;
+      const progress = JSON.parse(value);
+      if (!Number.isInteger(progress.step) || progress.step < 0 || progress.step >= instructions.length) return;
+      setStarted(true);
+      setCookStep(progress.step);
+      if (Array.isArray(progress.prepared)) setPrepared(progress.prepared.filter((index: unknown): index is number =>
+        typeof index === 'number' && Number.isInteger(index) && index >= 0 && index < ingredients.length));
+      if (Number.isFinite(progress.timer?.ends) && Number.isInteger(progress.timer?.step)) setTimer(progress.timer);
+    }).catch(() => {}).finally(() => { if (active) setProgressReady(true); });
+    return () => { active = false; };
+  }, [cookProgressKey, instructions.length, ingredients.length]);
+  useEffect(() => {
+    if (!cookProgressKey || !progressReady) return;
+    const action = started
+      ? AsyncStorage.setItem(cookProgressKey, JSON.stringify({ step: cookStep, timer, prepared }))
+      : AsyncStorage.removeItem(cookProgressKey);
+    void action.catch(() => {});
+  }, [cookProgressKey, progressReady, started, cookStep, timer, prepared]);
   const showingIngredients = section === 'ingredients';
   const selectedCount = shoppingSelection?.length ?? 0;
   const addLabel = selectedCount === 0 ? 'Add ingredients' : `Add ${selectedCount} ingredient${selectedCount === 1 ? '' : 's'}`;
@@ -68,6 +100,9 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
               <Glyph name="back" color={hasPhoto ? color.white : color.ink} size={17} />
             </IconButton>
             <View style={styles.actions}>
+              {onShareLink && <IconButton label="Share recipe link" glass={hasPhoto} onPress={onShareLink}>
+                <Glyph name="share" color={hasPhoto ? color.white : color.ink} size={18} />
+              </IconButton>}
               {onEdit && <IconButton label="Edit" glass={hasPhoto} onPress={onEdit}>
                 <Glyph name="edit" color={hasPhoto ? color.white : color.ink} size={18} />
               </IconButton>}
@@ -88,7 +123,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
           {allergens.length > 0 && (warnings.length > 0 || recipe.source) && <View style={styles.allergyPanel}>
             <Copy accessibilityRole="header" style={styles.allergyTitle}>{warnings.length ? warningLabels(warnings).join(' · ') : 'Review imported ingredients'}</Copy>
             {warnings.map(({ allergen, line, confirmed }, index) => <Copy key={index}>
-              {confirmed ? 'Contains' : 'Check for'} {allergenNames[allergen].toLowerCase()} · {line}
+              {confirmed ? 'Contains' : 'Check label for'} {allergenNames[allergen].toLowerCase()} · {line}
             </Copy>)}
             <Copy>Check the full ingredient list and product labels for allergens and cross-contact before cooking.</Copy>
           </View>}
@@ -97,7 +132,7 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
             {flagged.length ? <View style={styles.allergenTags}>{flagged.map(allergen => {
               const confirmed = matches.some(match => match.allergen === allergen && match.confirmed);
               return <Copy key={allergen} style={styles.allergenTag}>
-                {confirmed ? 'Contains' : 'Check for'} {allergenNames[allergen].toLowerCase()}
+                {confirmed ? 'Contains' : 'Check label for'} {allergenNames[allergen].toLowerCase()}
               </Copy>;
             })}</View> : <Copy style={styles.allergenHelp}>No allergens flagged in the listed ingredients.</Copy>}
             <Copy style={styles.allergenHelp}>Based on ingredient text. Check product labels and possible cross-contact.</Copy>
@@ -132,12 +167,15 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
           }}><Copy style={styles.sourceText}>Original recipe</Copy><Glyph name="external" color={color.secondaryInk} size={15} /></Pressable>}
           {sourceError && <Copy accessibilityRole="alert" style={styles.sourceText}>Couldn’t open the original recipe.</Copy>}
           {onShare && <Action secondary label="Share with the community" onPress={onShare}><Glyph name="share" color={color.ink} /></Action>}
-          {reviewerId && reviewTarget(recipe.id) && <RecipeReviews recipeId={recipe.id} userId={reviewerId} />}
+          {reviewerId && target && <RecipeReviews key={reviewRevision} recipeId={recipe.id} userId={reviewerId}
+            onReport={id => onReport({ type: 'review', id })} />}
+          {target?.column === 'community_id' && <Action secondary label="Report recipe" onPress={() => onReport({ type: 'recipe', id: target.id })} />}
         </View>
       </View>
     </ScrollView>
     {instructions.length > 0 && <View pointerEvents="box-none" style={[styles.dock, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-      <Action style={[styles.wideAction, styles.dockAction]} label={cookStep > 0 || timer ? 'Resume cooking' : 'Start cooking'} onPress={() => setCooking(true)}>
+      <Action style={[styles.wideAction, styles.dockAction]} disabled={!progressReady}
+        label={started ? 'Resume cooking' : 'Start cooking'} onPress={() => { setStarted(true); setCooking(true); }}>
         <Glyph name="forward" color={color.white} size={17} />
       </Action>
     </View>}
@@ -167,7 +205,30 @@ export function RecipeScreen({ recipe, onBack, onEdit, saved, onSave, onShare, o
     {cooking && <CookMode recipe={recipe} stepIndex={cookStep} setStep={setCookStep} timer={timer} setTimer={setTimer}
       prepared={prepared} onTogglePrepared={index => setPrepared(current => current.includes(index)
         ? current.filter(item => item !== index) : [...current, index])}
-      close={() => setCooking(false)} />}
+      close={() => setCooking(false)} finish={() => { setCooking(false); setFinish('finish'); }} />}
+    {finish === 'finish' && <Sheet title="How did it turn out?" close={() => setFinish(undefined)} busy={cookSubmission.busy}>
+      <Copy>Add this recipe to your private cooking history.</Copy>
+      {cookSubmission.error && <Copy accessibilityRole="alert">{cookSubmission.error}</Copy>}
+      <Action label={cookSubmission.busy ? 'Saving…' : 'Cooked it'} disabled={cookSubmission.busy}
+        onPress={() => void cookSubmission.run(async () => {
+          await onCooked();
+          setStarted(false);
+          setCookStep(0);
+          setPrepared([]);
+          setTimer(undefined);
+          setFinish('saved');
+        })} />
+    </Sheet>}
+    {finish === 'saved' && <Sheet title="Saved to cooking history" close={() => setFinish(undefined)}>
+      {reviewerId && target && <Action label="Leave a review" onPress={() => setFinish('review')} />}
+      <Action secondary label="Done" onPress={() => setFinish(undefined)} />
+    </Sheet>}
+    {finish === 'review' && reviewerId && <Sheet title="Rate this recipe" close={() => {
+      setFinish(undefined);
+      setReviewRevision(value => value + 1);
+    }}>
+      <RecipeReviews recipeId={recipe.id} userId={reviewerId} startEditing />
+    </Sheet>}
   </Animated.View>;
 }
 

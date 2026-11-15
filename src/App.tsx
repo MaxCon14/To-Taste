@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, BackHandler, Platform, Pressable, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -28,14 +28,23 @@ import { AccountAccess } from './AccountAccess';
 import { accountsConfigured, importGuestRecipes, publishRecipe, readCommunity, readFollowingRecipes, readPublications, readSession, savePersonalization, saveProfile, saveRecipe, signOut, unpublishRecipe, type Account } from './cookbookApi';
 import { exchangeAuthCallback, requestAccountDeletion, restoreNativeCallback, signInWithProvider } from './accountAuth';
 import { monitorSession } from './supabase';
+import { markCooked, readCooked, readShopping, writeShopping, type CookedRecipe } from './activityApi';
+import { BlockedAccounts, ReportSheet, type ReportTarget } from './moderation';
+import { parseSharedLink, readSharedContent, recipeShareLink, shareLink, sharedLinkFromUrl, SharedPreview, type SharedLink } from './SharedLinks';
 
 const storageKey = 'pinch.recipes.v1';
 const preferenceKey = 'pinch.preference.v1';
 const shoppingKey = 'pinch.shopping.v1';
 const intentKey = 'to-taste.auth-intent.v1';
+const pendingLinkKey = (userId: string) => `to-taste.shared-link.${userId}`;
+
+function readPendingLink(value?: string | null) {
+  try { return value ? parseSharedLink(JSON.parse(value)) : undefined; }
+  catch { return undefined; }
+}
 
 type Notice = { text: string; undo?: () => void; viewList?: boolean; error?: boolean; persistent?: boolean };
-type AuthIntent = { kind: 'access' | 'link'; tab: Tab; selected?: string; share?: string; cook?: string; created: number };
+type AuthIntent = { kind: 'access' | 'link'; tab: Tab; selected?: string; share?: string; cook?: string; sharedLink?: SharedLink; created: number };
 
 function parseIntent(value: string): AuthIntent | null {
   try {
@@ -82,6 +91,10 @@ function Cookbook() {
   const [collectionEditor, setCollectionEditor] = useState<{ collection?: SavedCollection }>();
   const [collectionRecipe, setCollectionRecipe] = useState<Recipe>();
   const [shopping, setShopping] = useState<ShoppingItem[]>([]);
+  const [shoppingStatus, setShoppingStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [legacyShopping, setLegacyShopping] = useState<ShoppingItem[]>([]);
+  const [importShopping, setImportShopping] = useState(false);
+  const shoppingImport = useSubmission();
   const latestShopping = useRef<ShoppingItem[]>([]);
   const shoppingWrites = useRef(Promise.resolve());
   const [selected, setSelected] = useState<string>();
@@ -93,7 +106,7 @@ function Cookbook() {
   const [guestRecipes, setGuestRecipes] = useState<Recipe[]>([]);
   const [syncPrompt, setSyncPrompt] = useState(false);
   const [accountSettings, setAccountSettings] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<PreferencePage | SupportPage>();
+  const [settingsPage, setSettingsPage] = useState<PreferencePage | SupportPage | 'blocked'>();
   const [signInSettings, setSignInSettings] = useState(false);
   const [profileSection, setProfileSection] = useState<'posts' | 'recipes' | 'books'>('posts');
   const [profileRevision, setProfileRevision] = useState(0);
@@ -104,6 +117,7 @@ function Cookbook() {
   const [share, setShare] = useState<string>();
   const [published, setPublished] = useState<Record<string, ShareOptions>>({});
   const [community, setCommunity] = useState<Recipe[]>([]);
+  const communityLoad = useRef(0);
   const [following, setFollowing] = useState<Recipe[]>();
   const [followingFailed, setFollowingFailed] = useState(false);
   const [followRevision, setFollowRevision] = useState(0);
@@ -113,6 +127,13 @@ function Cookbook() {
   const [book, setBook] = useState<RecipeBook>();
   const [creatingBook, setCreatingBook] = useState(false);
   const [openedPost, setOpenedPost] = useState<Recipe>();
+  const [sharedLink, setSharedLink] = useState(() => Platform.OS === 'web' && typeof window !== 'undefined'
+    ? sharedLinkFromUrl(window.location.href) : undefined);
+  const [report, setReport] = useState<ReportTarget>();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [cooked, setCooked] = useState<CookedRecipe[]>();
+  const [historyFailed, setHistoryFailed] = useState(false);
+  const [socialRevision, setSocialRevision] = useState(0);
   const [profileLink, setProfileLink] = useState(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
     const handle = new URLSearchParams(window.location.search).get('cook');
@@ -150,16 +171,15 @@ function Cookbook() {
       }
       const user = session?.user ?? null;
       const intent = pendingIntent ? parseIntent(pendingIntent) : null;
-      const savedDraft = await readDraft(user);
+      const [savedDraft, savedDestination] = await Promise.all([
+        readDraft(user), user ? AsyncStorage.getItem(pendingLinkKey(user.id)) : null,
+      ]);
       if (!active) return;
-      const savedShopping: unknown = storedShopping ? JSON.parse(storedShopping) : [];
-      if (!Array.isArray(savedShopping) || !savedShopping.every((item) => item
-        && typeof item.id === 'string' && typeof item.line === 'string'
-        && typeof item.recipe === 'string' && typeof item.checked === 'boolean')) {
-        throw new Error('Invalid shopping list data');
-      }
-      latestShopping.current = savedShopping;
-      setShopping(savedShopping);
+      try {
+        const savedShopping: unknown = storedShopping ? JSON.parse(storedShopping) : [];
+        if (Array.isArray(savedShopping)) setLegacyShopping(savedShopping.filter(item => item
+          && typeof item.id === 'string' && typeof item.line === 'string' && typeof item.recipe === 'string' && typeof item.checked === 'boolean'));
+      } catch { /* Old shopping data is independent from loading the user's cookbook. */ }
       accountRef.current = user;
       setAccount(user);
       latest.current = user ? session!.recipes : data;
@@ -169,6 +189,11 @@ function Cookbook() {
       setOnboarding(!user?.personalization || !user.username);
       setShowDietPrompt(!localDiet && (!user || user.diet === 'any'));
       if (user) {
+        const destination = parseSharedLink(intent?.sharedLink) ?? readPendingLink(savedDestination);
+        if (destination) {
+          setSharedLink(current => current ?? destination);
+          await AsyncStorage.setItem(pendingLinkKey(user.id), JSON.stringify(destination));
+        }
         setPreference(user.diet);
         if (pendingIntent) {
           restoreIntent(intent);
@@ -189,15 +214,55 @@ function Cookbook() {
   }, [loadAttempt]);
 
   function updateShopping(update: (current: ShoppingItem[]) => ShoppingItem[]) {
+    const owner = accountRef.current?.id;
     const operation = shoppingWrites.current.then(async () => {
-      const next = update(latestShopping.current);
-      if (next === latestShopping.current) return;
-      await AsyncStorage.setItem(shoppingKey, JSON.stringify(next));
+      if (!owner || accountRef.current?.id !== owner) throw new Error('Sign in again to update your list.');
+      const current = latestShopping.current;
+      const next = update(current);
+      if (next === current) return;
+      await writeShopping(current, next);
+      if (accountRef.current?.id !== owner) return;
       latestShopping.current = next;
       setShopping(next);
     });
     shoppingWrites.current = operation.catch(showError);
     return operation;
+  }
+
+  function refreshShopping() {
+    const owner = accountRef.current?.id;
+    if (!owner) return;
+    const operation = shoppingWrites.current.then(async () => {
+      if (accountRef.current?.id !== owner) return;
+      try {
+        const items = await readShopping(owner);
+        if (accountRef.current?.id !== owner) return;
+        latestShopping.current = items;
+        setShopping(items);
+        setShoppingStatus('ready');
+      } catch {
+        if (accountRef.current?.id === owner) setShoppingStatus('error');
+      }
+    });
+    shoppingWrites.current = operation.catch(() => {});
+  }
+
+  useEffect(() => {
+    if (!account?.id) return;
+    refreshShopping();
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') refreshShopping(); });
+    return () => subscription.remove();
+  }, [account?.id]);
+
+  async function importDeviceList() {
+    await updateShopping(current => {
+      const existing = new Set(current.map(item => item.id));
+      return [...current, ...legacyShopping.filter(item => !existing.has(item.id))];
+    });
+    await AsyncStorage.removeItem(shoppingKey);
+    setLegacyShopping([]);
+    setImportShopping(false);
+    setNotice({ text: 'Shopping list imported' });
   }
 
   async function addIngredients(recipe: Recipe, indices: number[]) {
@@ -219,7 +284,20 @@ function Cookbook() {
   }
 
   function refreshCommunity() {
-    void readCommunity().then(setCommunity).catch(() => {});
+    const request = ++communityLoad.current;
+    void readCommunity().then(value => { if (request === communityLoad.current) setCommunity(value); }).catch(() => {});
+  }
+
+  function moderationChanged() {
+    setCook(undefined);
+    setBook(undefined);
+    setSelected(undefined);
+    setOpenedPost(undefined);
+    setCommunity([]);
+    setFollowing(undefined);
+    setSocialRevision(value => value + 1);
+    setFollowRevision(value => value + 1);
+    refreshCommunity();
   }
 
   useEffect(() => {
@@ -243,6 +321,42 @@ function Cookbook() {
     url.searchParams.delete('cook');
     window.history.replaceState(window.history.state, '', url);
   }, [ready, account, onboarding, profileLink]);
+
+  useEffect(() => {
+    if (!ready || !account?.username || onboarding || !sharedLink) return;
+    let active = true;
+    void readSharedContent(sharedLink).then(content => {
+      if (!active) return;
+      setTab('explore');
+      if (content?.kind === 'recipe') {
+        setOpenedPost(content.recipe);
+        setSelected(content.recipe.id);
+      } else if (content?.kind === 'book') setBook(content.book);
+      else setNotice({ text: 'This link is no longer available', error: true });
+      clearSharedLink();
+    }).catch(() => {
+      if (!active) return;
+      setNotice({ text: 'Couldn’t open this link. Try opening the original link again.', error: true });
+      clearSharedLink();
+    });
+    return () => { active = false; };
+  }, [ready, account?.username, onboarding, sharedLink]);
+
+  function clearSharedLink() {
+    setSharedLink(undefined);
+    const userId = accountRef.current?.id;
+    if (userId) void AsyncStorage.removeItem(pendingLinkKey(userId)).catch(() => {});
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('recipe');
+    url.searchParams.delete('book');
+    window.history.replaceState(window.history.state, '', url);
+  }
+
+  function openSharedNativeUrl(url?: string | null) {
+    const link = sharedLinkFromUrl(url);
+    if (link) setSharedLink(link);
+  }
 
   useEffect(() => {
     let active = true;
@@ -306,6 +420,37 @@ function Cookbook() {
   }
 
   const discoveries = [...new Map([...featuredRecipes, ...community, ...(following ?? []), ...(openedPost ? [openedPost] : [])].map(recipe => [recipe.id, recipe])).values()];
+
+  async function recordCooking(recipe: Recipe) {
+    const owner = accountRef.current?.id;
+    if (!owner) throw new Error('Sign in to save your cooking history.');
+    const operation = writes.current.then(async () => {
+      if (accountRef.current?.id !== owner) return;
+      await markCooked(recipe);
+      if (accountRef.current?.id !== owner) return;
+      if (!latest.current.some(item => item.id === recipe.id)) {
+        latest.current = [recipe, ...latest.current];
+        setRecipes(latest.current);
+      }
+      setCooked(previous => [{ recipe_id: recipe.id, cooked_at: new Date().toISOString() },
+        ...(previous ?? []).filter(item => item.recipe_id !== recipe.id)]);
+      setNotice({ text: 'Added to your cooking history' });
+    });
+    writes.current = operation.catch(() => {});
+    return operation;
+  }
+
+  async function loadHistory() {
+    const owner = accountRef.current?.id;
+    if (!owner) return;
+    setHistoryFailed(false);
+    try {
+      const result = await readCooked(owner);
+      if (owner === accountRef.current?.id) setCooked(result);
+    } catch {
+      if (owner === accountRef.current?.id) setHistoryFailed(true);
+    }
+  }
 
   async function updateRecipeCollections(recipe: Recipe, add: string[], remove: string[], created?: NewCollection) {
     const owner = accountRef.current?.id;
@@ -415,12 +560,14 @@ function Cookbook() {
     setSelected(intent.selected);
     setShare(intent.share);
     if (intent.cook && /^[a-z0-9][a-z0-9_]{2,23}$/.test(intent.cook)) setProfileLink(intent.cook);
+    const destination = parseSharedLink(intent.sharedLink);
+    if (destination) setSharedLink(destination);
   }
 
   async function prepareAuth(kind: AuthIntent['kind'] = 'access') {
     const destination = onboarding ? 'explore' : tab;
     await AsyncStorage.setItem(intentKey, JSON.stringify({ kind, tab: destination, selected, share,
-      cook: !openedProfileLink.current ? profileLink : undefined, created: Date.now() }));
+      cook: !openedProfileLink.current ? profileLink : undefined, sharedLink, created: Date.now() }));
   }
 
   function applySession() {
@@ -451,7 +598,12 @@ function Cookbook() {
     setOnboarding(!user.personalization || !user.username);
     setAuth(false);
     setAuthError('');
-    if (intent) restoreIntent(parseIntent(intent));
+    if (intent) {
+      const pending = parseIntent(intent);
+      const destination = parseSharedLink(pending?.sharedLink);
+      if (destination) await AsyncStorage.setItem(pendingLinkKey(user.id), JSON.stringify(destination));
+      restoreIntent(pending);
+    }
     if (wasGuest && guest.length) setSyncPrompt(true);
     await AsyncStorage.removeItem(intentKey);
   }
@@ -485,6 +637,16 @@ function Cookbook() {
     accountRef.current = null;
     latest.current = [];
     setAccount(null);
+    communityLoad.current += 1;
+    setCommunity([]);
+    latestShopping.current = [];
+    setShopping([]);
+    setShoppingStatus('loading');
+    setImportShopping(false);
+    setHistoryOpen(false);
+    setCooked(undefined);
+    setReport(undefined);
+    setSharedLink(undefined);
     collectionLoad.current += 1;
     setCollections(undefined);
     setCollectionsFailed(false);
@@ -523,7 +685,9 @@ function Cookbook() {
 
   useEffect(() => {
     const stop = monitorSession(() => void restoreGuest().catch(showError));
+    if (Platform.OS !== 'web') void Linking.getInitialURL().then(openSharedNativeUrl).catch(() => {});
     const deepLink = Linking.addEventListener('url', ({ url }) => {
+      openSharedNativeUrl(url);
       void exchangeAuthCallback(url).then(completed => { if (completed) return applySession(); }).catch(error => {
         setAuthError(error.message);
         showError(error);
@@ -573,6 +737,10 @@ function Cookbook() {
   }
 
   const authSheet = auth && <AccountAccess close={closeAuth} prepare={prepareAuth} onSignedIn={applySession} error={authError} />;
+  if (!account && sharedLink && accountsConfigured) return <>
+    <SharedPreview link={sharedLink} signIn={() => setAuth(true)} explore={clearSharedLink} />
+    {authSheet}
+  </>;
   if (onboarding || !account || !account.username) return <>
     <Onboarding key={account?.id ?? 'signup'} account={account} recipes={discoveries} complete={finishWelcome} profileSaved={applyCookProfile}
       signIn={accountsConfigured && !account ? () => setAuth(true) : undefined} />
@@ -580,7 +748,9 @@ function Cookbook() {
     {authSheet}
   </>;
 
-  const activeRecipe = recipes.find((recipe) => recipe.id === selected) ?? discoveries.find((recipe) => recipe.id === selected);
+  const activeRecipe = (openedPost?.id === selected ? openedPost : undefined)
+    ?? recipes.find((recipe) => recipe.id === selected) ?? discoveries.find((recipe) => recipe.id === selected);
+  const activeRecipeLink = activeRecipe ? recipeShareLink(activeRecipe.id) : undefined;
   const shareRecipe = recipes.find((recipe) => recipe.id === share);
   const recipeEditable = Boolean(activeRecipe && recipes.some(recipe => recipe.id === activeRecipe.id)
     && !activeRecipe.discovery && !activeRecipe.id.startsWith('community:'));
@@ -591,6 +761,7 @@ function Cookbook() {
     setSelected(undefined);
     if (next === 'saved' && tab === 'saved') setCollectionId(undefined);
     setTab(next);
+    if (next === 'shopping') refreshShopping();
   }
   function startForm(state: FormState) {
     setAddMenu(false);
@@ -612,15 +783,17 @@ function Cookbook() {
         <Library active={tab === 'explore'} recipes={exploreRecipes} savedIds={savedIds} onOpen={setSelected} onSave={setCollectionRecipe}
           social={{ feed, setFeed, openRecipe: openSocialRecipe, openBook: setBook, openCook: person => setCook({ id: person.user_id }),
             loading: feed === 'following' && following === undefined && !followingFailed,
-            failed: feed === 'following' && followingFailed, retry: () => setFollowRevision(value => value + 1) }}
+            failed: feed === 'following' && followingFailed, retry: () => setFollowRevision(value => value + 1), revision: socialRevision }}
           personalization={account.personalization}
           preference={preference} onDiet={() => setDietSheet(true)}
           onDismissDiet={showDietPrompt ? () => void saveDiet('any').catch(showError) : undefined} />
       </View>
       {tab === 'saved' && <SavedCollections active={!activeRecipe} collections={collections} failed={collectionsFailed} retry={refreshCollections}
         current={currentCollection} recipes={recipes} openCollection={setCollectionId} openRecipe={setSelected} manageRecipe={setCollectionRecipe}
-        create={() => setCollectionEditor({})} edit={collection => setCollectionEditor({ collection })} explore={() => changeTab('explore')} />}
+        create={() => setCollectionEditor({})} edit={collection => setCollectionEditor({ collection })} explore={() => changeTab('explore')}
+        openHistory={() => { setHistoryOpen(true); void loadHistory(); }} />}
       {tab === 'shopping' && <ShoppingList items={shopping}
+        status={shoppingStatus} retry={refreshShopping} onImport={legacyShopping.length ? () => setImportShopping(true) : undefined}
         onToggle={(ids) => void updateShopping((current) => {
           const selected = current.filter(item => ids.has(item.id));
           const checked = selected.some(item => !item.checked);
@@ -639,6 +812,11 @@ function Cookbook() {
     {activeRecipe && <RecipeScreen key={activeRecipe.id + activeRecipe.ingredients} recipe={activeRecipe}
       onAuthor={activeRecipe.discovery?.authorId ? () => setCook({ id: activeRecipe.discovery!.authorId! }) : undefined}
       reviewerId={account.id}
+      onCooked={() => recordCooking(activeRecipe)} onReport={setReport}
+      onShareLink={activeRecipeLink ? () => {
+        void shareLink(activeRecipeLink, activeRecipe.title)
+          .then(copied => { if (copied) setNotice({ text: 'Recipe link copied' }); }).catch(showError);
+      } : undefined}
       allergens={account.personalization?.allergens}
       onBack={() => setSelected(undefined)} saved={savedIds.has(activeRecipe.id)} onSave={() => setCollectionRecipe(activeRecipe)}
       onAddIngredients={(indices) => addIngredients(activeRecipe, indices)}
@@ -667,13 +845,31 @@ function Cookbook() {
       }} />}
     {cook && !editCook && !book && !creatingBook && <CookProfile lookup={cook} account={account} close={() => setCook(undefined)} edit={() => setEditCook(true)}
       openRecipe={openSocialRecipe} openBook={setBook} createBook={() => setCreatingBook(true)}
-      followChanged={() => setFollowRevision(value => value + 1)} />}
+      followChanged={() => setFollowRevision(value => value + 1)} blocked={moderationChanged} />}
     {editCook && <ProfileEditor userId={account.id} close={() => setEditCook(false)} saved={profile => {
       applyCookProfile(profile);
       setEditCook(false);
       setProfileRevision(value => value + 1);
     }} />}
-    {book && <BookSheet book={book} close={() => setBook(undefined)} openRecipe={openSocialRecipe} />}
+    {book && <BookSheet book={book} close={() => setBook(undefined)} openRecipe={openSocialRecipe}
+      share={() => shareLink({ kind: 'book', id: book.id }, book.title)} />}
+    {report && <ReportSheet target={report} close={() => setReport(undefined)} />}
+    {historyOpen && <Sheet title="Cooking history" close={() => setHistoryOpen(false)}>
+      {historyFailed && <Action secondary label="Retry cooking history" onPress={() => void loadHistory()} />}
+      {!cooked && !historyFailed && <Copy accessibilityLiveRegion="polite">Opening your cooking history…</Copy>}
+      {cooked?.length === 0 && <Copy>Recipes you mark as cooked will appear here.</Copy>}
+      {cooked?.map(item => {
+        const recipe = recipes.find(entry => entry.id === item.recipe_id);
+        return recipe && <Action secondary key={item.recipe_id} label={recipe.title}
+          onPress={() => { setHistoryOpen(false); setSelected(recipe.id); }} />;
+      })}
+    </Sheet>}
+    {importShopping && <Sheet title="Import this device’s list?" close={() => setImportShopping(false)} busy={shoppingImport.busy}>
+      <Copy>The items on this device will be added to your account and sync across your devices.</Copy>
+      {shoppingImport.error && <Copy accessibilityRole="alert">{shoppingImport.error}</Copy>}
+      <Action label={shoppingImport.busy ? 'Importing…' : 'Import list'} disabled={shoppingImport.busy}
+        onPress={() => void shoppingImport.run(importDeviceList)} />
+    </Sheet>}
     {creatingBook && <CreateBook userId={account.id} close={() => setCreatingBook(false)} saved={() => {
       setCreatingBook(false);
       setProfileRevision(value => value + 1);
@@ -689,8 +885,7 @@ function Cookbook() {
     {!activeRecipe && <GlassNav tab={tab} onChange={changeTab} onAdd={() => setAddMenu(true)} adding={addMenu || Boolean(form)} />}
     {addMenu && <Sheet title="Add a recipe" close={() => setAddMenu(false)}>
       {draft && <Action label="Resume draft" onPress={() => startForm(draft)} />}
-      {!(process.env.EXPO_PUBLIC_STATIC_PREVIEW === '1' && Platform.OS === 'web') &&
-        <RecipeOption title="Import link" description="Bring a recipe you love into To Taste." icon="link" onPress={() => startForm({ mode: 'import' })} />}
+      <RecipeOption title="Import link" description="Bring a recipe you love into To Taste." icon="link" onPress={() => startForm({ mode: 'import' })} />
       <RecipeOption title="Write a recipe" description="Your ingredients. Your way." icon="edit" onPress={() => startForm({ mode: 'manual' })} />
     </Sheet>}
     {form && <RecipeForm state={form} close={() => setForm(undefined)} save={save} remove={remove} onDraft={form.id ? undefined : rememberDraft} />}
@@ -707,6 +902,7 @@ function Cookbook() {
     {accountSettings && !settingsPage && !signInSettings && !deletePrompt && <Sheet title="Settings" busy={settings.busy} close={() => setAccountSettings(false)}>
       <SettingsGroup title="Account">
         <SettingsRow label="Sign-in methods" icon="profile" onPress={() => setSignInSettings(true)} />
+        <SettingsRow label="Blocked accounts" icon="allergens" onPress={() => setSettingsPage('blocked')} />
         {guestRecipes.length > 0 && <SettingsRow label="Sync recipes from this device" icon="book" onPress={() => { setAccountSettings(false); setSyncPrompt(true); }} />}
       </SettingsGroup>
       <SettingsGroup title="Preferences">
@@ -732,6 +928,7 @@ function Cookbook() {
         back={() => setSettingsPage(undefined)} saveDiet={saveDiet} savePreferences={updatePersonalization} />}
     {accountSettings && (settingsPage === 'feedback' || settingsPage === 'rating' || settingsPage === 'help') &&
       <SupportSettings key={settingsPage} page={settingsPage} back={() => setSettingsPage(undefined)} />}
+    {accountSettings && settingsPage === 'blocked' && <BlockedAccounts back={() => setSettingsPage(undefined)} changed={moderationChanged} />}
     {accountSettings && signInSettings && !deletePrompt && <Sheet title="Sign-in methods" busy={settings.busy} back={() => setSignInSettings(false)}>
       <Copy>Add a sign-in method to the account you’re using now.</Copy>
       {(['apple', 'google'] as const).map(provider => <Action key={provider} secondary label={provider === 'apple' ? 'Link Apple' : 'Link Google'}

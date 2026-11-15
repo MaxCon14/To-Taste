@@ -13,11 +13,12 @@ type LibraryProps = {
   recipes: Recipe[]; current?: SavedCollection; openCollection: (id?: string) => void;
   openRecipe: (id: string) => void; manageRecipe: (recipe: Recipe) => void;
   create: () => void; edit: (collection: SavedCollection) => void; explore: () => void;
+  openHistory: () => void;
 };
 
 const countRecipes = (count: number) => `${count} ${count === 1 ? 'recipe' : 'recipes'}`;
 
-export function SavedCollections({ collections, failed, retry, active, recipes, current, openCollection, openRecipe, manageRecipe, create, edit, explore }: LibraryProps) {
+export function SavedCollections({ collections, failed, retry, active, recipes, current, openCollection, openRecipe, manageRecipe, create, edit, explore, openHistory }: LibraryProps) {
   const byId = new Map(recipes.map(recipe => [recipe.id, recipe]));
   const contents = current?.recipeIds.flatMap(id => byId.get(id) ?? []) ?? [];
   return <Scene trigger={active} style={styles.page}>
@@ -31,6 +32,7 @@ export function SavedCollections({ collections, failed, retry, active, recipes, 
         {!current && collections && <IconButton label="New collection" onPress={create}><Glyph name="plus" color={color.ink} size={22} /></IconButton>}
       </View>
       <Copy style={styles.helper}>{current ? countRecipes(contents.length) : 'Your private recipe collections.'}</Copy>
+      {!current && <Action secondary label="Cooking history" onPress={openHistory} />}
       {failed && <Action secondary label="Retry collections" onPress={retry} />}
       {!collections && !failed && <Copy accessibilityLiveRegion="polite" style={styles.helper}>Opening your collections…</Copy>}
       {collections?.length === 0 && <View style={styles.empty}>

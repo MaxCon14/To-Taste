@@ -3,6 +3,7 @@ import { ActivityIndicator, Animated, KeyboardAvoidingView, Modal, Platform, Scr
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { importRecipe, isSocialRecipeLink, normalizeRecipeUrl, recipeFromCaption } from './importRecipe';
 import { emptyDraft, lines, type RecipeDraft } from './recipes';
+import { parseIngredient } from './ingredients';
 import { supabase } from './supabase';
 import { MotionPressable as Pressable, useSceneMotion, useReducedMotion } from './motion';
 import { Glyph } from './Glyph';
@@ -38,7 +39,7 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
   const socialLink = isSocialRecipeLink(url);
   const socialDraft = !!draft.source && isSocialRecipeLink(draft.source);
   const localVideoImport = Platform.OS === 'web' && typeof window !== 'undefined'
-    && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    && !supabase && ['localhost', '127.0.0.1'].includes(window.location.hostname);
   const title = confirmDelete ? 'Delete this recipe?' : mode === 'import' ? 'Import a recipe' : state.id ? 'Edit recipe' : draft.source ? 'Review recipe' : 'Add a recipe';
 
   function update(key: keyof RecipeDraft, value: string) {
@@ -85,7 +86,11 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
           if (!fromCaption) throw new Error('Add an Ingredients or Directions heading on its own line, or write the recipe and keep the link.');
           imported = fromCaption;
         } else {
-          imported = await importRecipe(source, Platform.OS === 'web');
+          const session = (await supabase?.auth.getSession())?.data.session;
+          imported = await importRecipe(source, Platform.OS === 'web', session ? {
+            endpoint: `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/import-recipe-page`,
+            token: session.access_token, key: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '',
+          } : undefined);
         }
       }
       catch (error) {
@@ -187,6 +192,8 @@ export function RecipeForm({ state, close, save, remove, onDraft }: {
             </> : <>
               {!!draft.source && <Copy style={styles.helper}>Original link attached</Copy>}
               {socialDraft && <Copy style={styles.helper}>Compare this draft with the original video. Fill in any missing amounts, times, or steps before saving.</Copy>}
+              {!!draft.source && !lines(draft.instructions).length && <Copy style={styles.helper}>No cooking steps were found. Add the steps from the original before cooking.</Copy>}
+              {socialDraft && preview.some(line => !parseIngredient(line).quantity) && <Copy style={styles.helper}>Check the amounts for any ingredients without a quantity.</Copy>}
               {reviewNotes.length > 0 && <View style={styles.preview}>
                 <Copy accessibilityRole="header" style={styles.label}>Check against the video</Copy>
                 {reviewNotes.map((note, index) => <Copy key={index} style={styles.helper}>{note}</Copy>)}

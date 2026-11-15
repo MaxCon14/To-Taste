@@ -24,6 +24,12 @@ export async function readCookBooks(cookId: string) {
   return data;
 }
 
+export async function readSharedBook(id: string) {
+  const { data, error } = await requireSupabase().from('recipe_books').select(bookFields).eq('id', id).maybeSingle<RecipeBook>();
+  if (error) throw error;
+  return data;
+}
+
 export async function saveBook(title: string, postIds: string[]) {
   const { error } = await requireSupabase().from('recipe_books').insert({ title, post_ids: postIds });
   if (error) throw new Error('Couldn’t publish your book. Make sure its recipes are still published.');

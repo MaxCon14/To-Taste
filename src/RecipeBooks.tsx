@@ -60,10 +60,14 @@ export function CollectionRow({ book, open }: { book: RecipeBook; open: () => vo
   </MotionPressable>;
 }
 
-export function BookSheet({ book, close, openRecipe }: { book: RecipeBook; close: () => void; openRecipe: (post: Recipe) => void }) {
+export function BookSheet({ book, close, openRecipe, share }: { book: RecipeBook; close: () => void; openRecipe: (post: Recipe) => void;
+  share: () => Promise<boolean>;
+}) {
   const [posts, setPosts] = useState<Recipe[]>();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const { busy, error, run } = useSubmission();
   useEffect(() => {
     let active = true;
     void readBookRecipes(book.post_ids).then(value => { if (active) setPosts(value); })
@@ -72,6 +76,11 @@ export function BookSheet({ book, close, openRecipe }: { book: RecipeBook; close
   }, [book, attempt]);
   return <Sheet title={book.title} close={close}>
     <Copy style={styles.secondary}>Recipe book</Copy>
+    <Action secondary label={copied ? 'Link copied' : 'Share book link'} disabled={busy}
+      onPress={() => void run(async () => { setCopied(await share()); })}>
+      <Glyph name="share" color={color.ink} size={17} />
+    </Action>
+    {error && <Copy accessibilityRole="alert" style={styles.error}>{error}</Copy>}
     {failed ? <Action secondary label="Retry book" onPress={() => { setFailed(false); setAttempt(value => value + 1); }} />
       : !posts ? <Copy style={styles.secondary}>Opening book…</Copy>
       : !posts.length ? <Copy style={styles.secondary}>This book has no currently published recipes.</Copy>

@@ -18,8 +18,9 @@ export function timerSuggestion(step: string) {
 
 export type CookingTimer = { ends: number; step: number };
 
-export function CookMode({ recipe, stepIndex, setStep, close, timer, setTimer, prepared, onTogglePrepared }: {
+export function CookMode({ recipe, stepIndex, setStep, close, finish, timer, setTimer, prepared, onTogglePrepared }: {
   recipe: Recipe; stepIndex: number; setStep: (index: number) => void; close: () => void;
+  finish: () => void;
   timer?: CookingTimer; setTimer: (timer: CookingTimer | undefined) => void;
   prepared: number[]; onTogglePrepared: (index: number) => void;
 }) {
@@ -96,8 +97,7 @@ export function CookMode({ recipe, stepIndex, setStep, close, timer, setTimer, p
         {!showIngredients && <View style={styles.buttons}>
           <Action secondary style={styles.button} label="Back" disabled={stepIndex === 0} onPress={() => setStep(stepIndex - 1)} />
           <Action style={styles.button} label={last ? 'Finish' : 'Next'} onPress={() => {
-            if (last && !timer) { setStep(0); close(); }
-            else if (last) close();
+            if (last) finish();
             else setStep(stepIndex + 1);
           }} />
         </View>}

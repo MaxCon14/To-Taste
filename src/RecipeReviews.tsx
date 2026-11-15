@@ -8,14 +8,16 @@ import { Action, color, Copy, font } from './ui';
 
 const stars = [1, 2, 3, 4, 5];
 
-export function RecipeReviews({ recipeId, userId }: { recipeId: string; userId: string }) {
+export function RecipeReviews({ recipeId, userId, onReport, startEditing = false }: {
+  recipeId: string; userId: string; onReport?: (id: string) => void; startEditing?: boolean;
+}) {
   const [data, setData] = useState<Awaited<ReturnType<typeof readReviews>>>();
   const [own, setOwn] = useState<Review>();
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [loadError, setLoadError] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing);
   const { busy, error, run } = useSubmission();
 
   useEffect(() => {
@@ -26,10 +28,14 @@ export function RecipeReviews({ recipeId, userId }: { recipeId: string; userId: 
       if (!active) return;
       setData(result);
       setOwn(result.own ?? undefined);
+      if (startEditing) {
+        setRating(result.own?.rating ?? 0);
+        setBody(result.own?.body ?? '');
+      }
       setLoadError(false);
     }).catch(() => { if (active) setLoadError(true); });
     return () => { active = false; };
-  }, [recipeId, userId, attempt]);
+  }, [recipeId, userId, attempt, startEditing]);
 
   const target = reviewTarget(recipeId);
   if (!target) return null;
@@ -88,6 +94,7 @@ export function RecipeReviews({ recipeId, userId }: { recipeId: string; userId: 
           <Copy style={styles.helper}>{review.id === own?.id ? 'Your review' : new Date(review.created_at).toLocaleDateString()}</Copy>
         </View>
         {!!review.body && <Copy style={styles.reviewText}>{review.body}</Copy>}
+        {onReport && review.id !== own?.id && <Action secondary label="Report review" onPress={() => onReport(review.id)} />}
       </View>)}
       {data.total > data.latest.length && <Copy style={styles.helper}>Showing the {data.latest.length} most recent reviews.</Copy>}
     </>}

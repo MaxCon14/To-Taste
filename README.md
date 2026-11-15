@@ -14,7 +14,7 @@ Design references: [Apple Liquid Glass](https://developer.apple.com/documentatio
 
 ## Try it on iPhone
 
-For a guest preview, use Expo Go compatible with SDK 54. Use a development build to test native Apple and Google sign-in and the To Taste callback scheme. Sign into the same Expo account on your computer and in Expo Go. Run these commands in the project folder, then scan the QR code with the iPhone camera while both devices are on the same Wi-Fi network.
+To run the project in Expo Go, use a version compatible with SDK 54. Use a development build to test native Apple and Google sign-in and the To Taste callback scheme. Sign into the same Expo account on your computer and in Expo Go. Run these commands in the project folder, then scan the QR code with the iPhone camera while both devices are on the same Wi-Fi network.
 
 ```sh
 npm install
@@ -24,7 +24,7 @@ npm start -- --go
 
 [Expo Go version compatibility](https://docs.expo.dev/troubleshooting/expo-go-version-mismatch/) · [Running on a physical device](https://docs.expo.dev/get-started/start-developing/)
 
-Set the Expo public values from `.env.example` in your development build environment to enable Supabase. Guest mode, local drafts, and the shopping list work without these values.
+Set the Expo public values from `.env.example` in your development build environment to enable sign-in and account data.
 
 ## Preview in a browser
 
@@ -38,15 +38,21 @@ Open [To Taste at localhost:4173](http://localhost:4173) using Node.js 24. The p
 
 ## Using the MVP
 
-- **Welcome** opens Explore in guest mode or offers a single screen to sign in or create an account. Explore includes an optional dietary preference card.
-- **Explore** is available to guests. Pick an optional dietary preference to order recipes or apply a diet filter to limit results.
+- **Welcome** takes new users through sign-in, profile setup, and cooking preferences. Shared recipes and public books show a preview and reopen after sign-in and onboarding.
+- **Explore** offers personalized discovery, a Following feed, and search across recipes, books, and people.
 - **Add** offers link import, manual entry, and draft recovery. Enter one ingredient and one direction per line. If a supported public link cannot be read, you can write the recipe and keep its source attached.
-- **Video import prototype** runs on the loopback-only Node preview. Set `GEMINI_API_KEY` in the server process environment, run `npm run build:web` and `npm run preview`, then try a social link. When the caption is unavailable, choose **Upload video** and select an MP4, MOV, or WebM clip under 20 MB. The clip is sent to Gemini and is not saved by the preview server. Review the editable draft and any flagged gaps before saving. The static hosted preview uses the pasted-caption fallback.
-- **Saved** contains your private recipe book and Favorites. After signing in, you can choose to copy guest recipes to your account or keep them on this device. Drafts are stored locally for each account or guest.
-- **Start cooking** opens the directions one step at a time with ingredient lookup and suggested timers. Timer state is scoped to the open recipe. The app keeps the screen awake in cooking mode where supported.
+- **Import link** on the hosted app uses the Supabase `import-recipe-page` function. For social posts with inaccessible captions, paste the recipe text or select **Upload video** on web. The video function accepts MP4, MOV, or WebM clips under 20 MB and requires the `GEMINI_API_KEY` Supabase secret. Review the draft against the original before saving.
+- **Saved** contains private collections and cooking history. The shopping list syncs to the signed-in account. Users can opt to import an older device-only list from the Shopping tab.
+- **Start cooking** opens directions one step at a time and retains progress and timers for the recipe on that device. **Cooked it** adds the dish to the account's private history and offers to leave a review where supported.
 - **Share with the community** opens a public preview from a recipe you created. Publishing makes a snapshot available in Explore for other users. Deleting the original from your recipe book also removes its community post.
 
 Run `npm test` for ingredient parsing and import checks, and `npm run typecheck` for TypeScript.
+
+## Moderating the beta
+
+Open the [Supabase Table Editor](https://supabase.com/dashboard/project/ccbzwxgwefpmcfjoytmv/editor) and filter `content_reports` to `status = open`. Match `target_id` to `community_recipes.id` or `recipe_reviews.id` depending on `target_type`. Set the report to `dismissed` to close it or to `removed` to hide the recipe or review from public reads. Users can block profiles and manage their own blocks under **Profile → Settings → Blocked accounts**.
+
+For the first device test, open a shared recipe link on an iPhone, complete sign-in, save the recipe, add one ingredient to Shopping, and reopen that account on another device to check sync. Resume the recipe after closing the app, finish it, and find it under **Saved → Cooking history**. Repeat with a public book link and a pasted website recipe.
 
 ## Supabase account setup
 

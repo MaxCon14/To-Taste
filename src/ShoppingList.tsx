@@ -6,12 +6,15 @@ import { Action, color, Copy, font, IconButton, IngredientCard, Segment, segment
 import { ingredientAmount, parseIngredient } from './ingredients';
 import { groupShoppingByRecipe, groupShoppingItems, type ShoppingItem } from './shopping';
 
-export function ShoppingList({ items, onToggle, onRemove, onClearChecked, onExplore }: {
+export function ShoppingList({ items, onToggle, onRemove, onClearChecked, onExplore, status, retry, onImport }: {
   items: ShoppingItem[];
   onToggle: (ids: ReadonlySet<string>) => void;
   onRemove: (ids: ReadonlySet<string>) => void;
   onClearChecked: () => void;
   onExplore: () => void;
+  status: 'loading' | 'ready' | 'error';
+  retry: () => void;
+  onImport?: () => void;
 }) {
   useScreenFocus('shopping-heading');
   const [view, setView] = useState<'recipe' | 'ingredient'>('recipe');
@@ -25,7 +28,10 @@ export function ShoppingList({ items, onToggle, onRemove, onClearChecked, onExpl
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
       <View style={styles.content}>
         <Copy testID="shopping-heading" accessibilityRole="header" style={styles.title}>Shopping list</Copy>
-        {items.length ? <>
+        {onImport && <Action secondary label="Import this device’s old list" onPress={onImport} />}
+        {status === 'loading' && <Copy accessibilityLiveRegion="polite" style={styles.helper}>Opening your list…</Copy>}
+        {status === 'error' && <Action secondary label="Retry shopping list" onPress={retry} />}
+        {items.length > 0 ? <>
           <View style={segmentTrack}>
             <Segment label="By recipe" active={byRecipe} onPress={() => setView('recipe')} />
             <Segment label="By ingredient" active={!byRecipe} onPress={() => setView('ingredient')} />
@@ -74,7 +80,7 @@ export function ShoppingList({ items, onToggle, onRemove, onClearChecked, onExpl
               </View>
             </View>
           })}
-        </> : <View style={styles.empty}>
+        </> : status === 'ready' && <View style={styles.empty}>
           <Glyph name="shopping" color={color.ink} size={30} />
           <Copy style={styles.emptyTitle}>Your list is empty</Copy>
           <Copy style={styles.helper}>Open a recipe to add its ingredients here.</Copy>

@@ -16,6 +16,7 @@ type Props = {
   preference: Diet; onDiet: () => void; onDismissDiet?: () => void; active: boolean;
   personalization?: Personalization;
   social: { feed: 'explore' | 'following'; setFeed: (feed: 'explore' | 'following') => void; loading: boolean; failed: boolean; retry: () => void;
+    revision: number;
     openRecipe: (recipe: Recipe) => void; openBook: (book: RecipeBook) => void; openCook: (cook: Cook) => void };
 };
 
@@ -96,7 +97,7 @@ export function Library({ recipes, savedIds, onOpen, onSave, preference, onDiet,
           </Pressable>}
           </View>
         </View>
-        {globalSearch ? <ExploreResults key={search} query={search} openRecipe={social.openRecipe} openBook={social.openBook} openCook={social.openCook} /> : <>
+        {globalSearch ? <ExploreResults key={`${search}|${social.revision}`} query={search} openRecipe={social.openRecipe} openBook={social.openBook} openCook={social.openCook} /> : <>
         {showFilters && <Scene style={styles.filterPanel}>
           <View style={styles.filterHeading}>
             <Copy accessibilityRole="header" style={styles.filterTitle}>Find your kind of recipe</Copy>
